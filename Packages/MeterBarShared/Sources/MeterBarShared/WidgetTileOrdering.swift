@@ -16,11 +16,12 @@ public enum WidgetTileOrdering {
             .map(\.element)
     }
 
-    /// Sort key: blocked rows at -1, measured rows by percent left, the rest
-    /// after every measured row.
-    static func rank(_ row: WidgetPresentationRow) -> Int {
+    /// Sort key: blocked rows at -1, measured rows by exact headroom (not the
+    /// rounded percent, which ties 1.1% with 1.4%), the rest after every
+    /// measured row.
+    static func rank(_ row: WidgetPresentationRow) -> Double {
         if row.isBlocked { return -1 }
         guard let limit = row.limit, limit.reading == .measured else { return 1_000 }
-        return QuotaMath.percentLeft(for: limit)
+        return 100 - limit.percentage
     }
 }

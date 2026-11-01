@@ -248,7 +248,8 @@ public enum WidgetPresentationPlanner {
         preferences: WidgetPreferences,
         family: WidgetPresentationFamily,
         now: Date,
-        stalenessThreshold: TimeInterval = defaultStalenessThreshold
+        stalenessThreshold: TimeInterval = defaultStalenessThreshold,
+        rowOrdering: @Sendable ([WidgetPresentationRow]) -> [WidgetPresentationRow] = { $0 }
     ) -> WidgetPresentation {
         guard preferences.accountSelection.mode != .explicit
             || !preferences.accountSelection.explicitIdentifiers.isEmpty,
@@ -259,14 +260,18 @@ public enum WidgetPresentationPlanner {
 
         let sources = availableSources(metrics: metrics, accountMetrics: accountMetrics)
         let selectedSources = selectedSources(from: sources, preferences: preferences)
-        let rows = selectedSources.flatMap {
-            presentationRows(
-                for: $0,
-                preferences: preferences,
-                now: now,
-                stalenessThreshold: stalenessThreshold
-            )
-        }
+        // Ordering runs before the row budget so a widget that ranks rows (the
+        // Tiles widget, tightest first) never loses its tightest row to the cut.
+        let rows = rowOrdering(
+            selectedSources.flatMap {
+                presentationRows(
+                    for: $0,
+                    preferences: preferences,
+                    now: now,
+                    stalenessThreshold: stalenessThreshold
+                )
+            }
+        )
 
         guard !rows.isEmpty else {
             return WidgetPresentation(rows: [], hiddenRowCount: 0, emptyState: .unavailable)

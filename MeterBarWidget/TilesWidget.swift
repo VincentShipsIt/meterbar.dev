@@ -24,10 +24,11 @@ struct TilesWidgetEntryView: View {
     private var family
 
     var body: some View {
-        // Both sizes read the medium row budget: the small tile must pick the
-        // tightest of every selected row, not whichever row the small plan kept.
-        let presentation = entry.presentation(for: .medium)
-        let rows = WidgetTileOrdering.tightestFirst(presentation.rows)
+        // Rows are ranked before the planner's row budget cuts them, so the
+        // tightest provider survives however many are enabled. Both sizes read
+        // the medium budget; the small tile shows its first row.
+        let presentation = entry.presentation(for: .medium, rowOrdering: WidgetTileOrdering.tightestFirst)
+        let rows = presentation.rows
         Group {
             if let emptyState = presentation.emptyState {
                 WidgetEmptyStateView(state: emptyState, compact: family == .systemSmall)

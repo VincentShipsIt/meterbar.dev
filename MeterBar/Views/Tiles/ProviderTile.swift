@@ -17,7 +17,7 @@ struct ProviderTile: View {
         case floating
     }
 
-    static let compactMinHeight: CGFloat = 112
+    static let compactMinHeight: CGFloat = 124
 
     let snapshot: ProviderSnapshot
     let style: Style
@@ -147,8 +147,14 @@ struct ProviderTile: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-                if let line = content.outlook ?? content.windowTitle {
-                    Text(line)
+                if let window = content.windowTitle {
+                    Text(window)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let outlook = content.outlook {
+                    Text(outlook)
                         .font(.caption2)
                         .foregroundStyle(content.outlookIsShortfall ? toneColor(.critical) : .secondary)
                         .lineLimit(1)

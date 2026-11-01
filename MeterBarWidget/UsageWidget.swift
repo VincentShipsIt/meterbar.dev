@@ -35,13 +35,17 @@ struct UsageWidgetEntry: TimelineEntry {
     let accountMetrics: [AccountUsageSnapshot]
     let preferences: WidgetPreferences
 
-    func presentation(for family: WidgetPresentationFamily) -> WidgetPresentation {
+    func presentation(
+        for family: WidgetPresentationFamily,
+        rowOrdering: @Sendable ([WidgetPresentationRow]) -> [WidgetPresentationRow] = { $0 }
+    ) -> WidgetPresentation {
         WidgetPresentationPlanner.makePresentation(
             metrics: metrics,
             accountMetrics: accountMetrics,
             preferences: preferences,
             family: family,
-            now: date
+            now: date,
+            rowOrdering: rowOrdering
         )
     }
 }

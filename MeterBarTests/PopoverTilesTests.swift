@@ -466,4 +466,46 @@ final class PopoverTilesTests: XCTestCase {
         let percents = ordered.compactMap { $0.limit.map { QuotaMath.percentLeft(for: $0) } }
         XCTAssertEqual(percents, percents.sorted())
     }
+
+    func testTightestProviderSurvivesTheRowBudgetEvenWhenFourth() {
+        let metrics: [ServiceType: UsageMetrics] = [
+            .claudeCode: UsageMetrics(
+                service: .claudeCode,
+                weeklyLimit: UsageLimit(used: 10, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            .codexCli: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            .xai: UsageMetrics(
+                service: .xai,
+                weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+            .kimiCode: UsageMetrics(
+                service: .kimiCode,
+                weeklyLimit: UsageLimit(used: 95, total: 100, resetTime: nil),
+                lastUpdated: now
+            ),
+        ]
+        let presentation = WidgetPresentationPlanner.makePresentation(
+            metrics: metrics,
+            accountMetrics: [],
+            preferences: .defaults,
+            family: .medium,
+            now: now,
+            rowOrdering: WidgetTileOrdering.tightestFirst
+        )
+
+        XCTAssertEqual(presentation.rows.first?.service, .kimiCode, "ranked before the budget cuts rows")
+    }
+
+    func testRankingUsesExactHeadroomNotTheRoundedPercent() {
+        let tighter = UsageLimit(used: 98.9, total: 100, resetTime: nil)
+        let looser = UsageLimit(used: 98.6, total: 100, resetTime: nil)
+        XCTAssertEqual(QuotaMath.percentLeft(for: tighter), QuotaMath.percentLeft(for: looser), "rounded values tie")
+        XCTAssertLessThan(100 - tighter.percentage, 100 - looser.percentage)
+    }
 }
