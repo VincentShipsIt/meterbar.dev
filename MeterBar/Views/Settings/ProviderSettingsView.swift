@@ -442,13 +442,6 @@ struct ProviderSettingsView: View {
                     }
                 }
 
-                if let rateLimitTier = claudeCodeService.rateLimitTier {
-                    SettingsRowView(title: "Tier") {
-                        Text(rateLimitTier.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                }
             } else {
                 EmptyStateCard(
                     systemImage: "person.crop.circle.badge.exclamationmark",

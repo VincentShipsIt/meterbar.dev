@@ -36,37 +36,28 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code Maximum Usage"), "Maximum")
     }
 
-    func testOnlyClaudeUltraDropsTheSessionWindow() {
-        XCTAssertTrue(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: "Ultra"))
-        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: "Max"))
-        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: nil))
-        // Cursor also has an "Ultra" membership; its windows are untouched.
-        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .xai, planLabel: "Ultra"))
-    }
-
-    func testUltraCardShowsOnlyTheWeeklyWindow() {
-        let metrics = UsageMetrics(
-            service: .claudeCode,
-            sessionLimit: UsageLimit(used: 40, total: 100, resetTime: nil, windowSeconds: 5 * 3_600),
-            weeklyLimit: UsageLimit(used: 52, total: 100, resetTime: nil, windowSeconds: 7 * 86_400)
-        )
-        func card(plan: String) -> ProviderSnapshot? {
+    func testUltraCardShowsWhateverWindowsTheServerReports() {
+        // Verified Ultra accounts get no session window from the server;
+        // unverified ones keep a temporary one, which must stay visible.
+        let weekly = UsageLimit(used: 52, total: 100, resetTime: nil, windowSeconds: 7 * 86_400)
+        let session = UsageLimit(used: 40, total: 100, resetTime: nil, windowSeconds: 5 * 3_600)
+        func card(_ metrics: UsageMetrics) -> ProviderSnapshot? {
             var input = ProviderSnapshotBuilder.Input(
                 metrics: [:],
                 claudeAccounts: [.defaultAccount],
                 claudeAccountMetrics: [ClaudeCodeAccount.defaultID: metrics],
                 enabledServices: [.claudeCode]
             )
-            input.planLabels = [.claudeCode: plan]
+            input.planLabels = [.claudeCode: "Ultra"]
             return ProviderSnapshotBuilder.snapshots(input).first { $0.service == .claudeCode }
         }
 
-        let ultra = card(plan: "Ultra")
-        XCTAssertEqual(ultra?.planLabel, "Ultra")
-        XCTAssertEqual(ultra?.limits.map(\.kind), [.weekly])
-        XCTAssertEqual(ultra?.primaryLimit?.kind, .weekly)
+        let verified = card(UsageMetrics(service: .claudeCode, weeklyLimit: weekly))
+        XCTAssertEqual(verified?.planLabel, "Ultra")
+        XCTAssertEqual(verified?.limits.map(\.kind), [.weekly])
 
-        XCTAssertEqual(card(plan: "Max")?.limits.map(\.kind), [.session, .weekly])
+        let unverified = card(UsageMetrics(service: .claudeCode, sessionLimit: session, weeklyLimit: weekly))
+        XCTAssertEqual(unverified?.limits.map(\.kind), [.session, .weekly])
     }
 
     func testEmptyTokenYieldsNoLabel() {

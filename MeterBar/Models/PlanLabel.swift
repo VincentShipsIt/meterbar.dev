@@ -43,13 +43,12 @@ enum PlanLabel {
     /// "Max 20x") is now **Ultra**. The OAuth credential still reports both as
     /// `subscriptionType: "max"`, so the multiplier in `rateLimitTier` is what
     /// tells them apart.
+    ///
+    /// Verified Ultra accounts have no 5-hour limit, and the usage endpoint
+    /// then sends no session window. Unverified Ultra accounts keep a temporary
+    /// one, so the card trusts whatever windows the server reports rather than
+    /// hiding the session window by plan.
     static let claudeUltra = "Ultra"
-
-    /// Whether this plan has no 5-hour session cap. Ultra dropped it, so a
-    /// session meter on an Ultra card would be a quota that never binds.
-    static func omitsSessionWindow(service: ServiceType, planLabel: String?) -> Bool {
-        service == .claudeCode && planLabel == claudeUltra
-    }
 
     private static func claudePlan(token: String, rateLimitTier: String?) -> String {
         let multiplier = claudeMultiplier(from: rateLimitTier)

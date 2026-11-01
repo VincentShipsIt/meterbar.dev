@@ -13,8 +13,7 @@ struct ProviderSnapshot: Identifiable {
     let title: String
     let service: ServiceType
     let updatedAt: Date?
-    /// A `var` so the plan pass can drop windows the plan does not have.
-    var limits: [SnapshotLimit]
+    let limits: [SnapshotLimit]
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
@@ -779,11 +778,6 @@ enum ProviderSnapshotBuilder {
             guard ownsCredentials else { return card }
             var labelled = card
             labelled.planLabel = label
-            if PlanLabel.omitsSessionWindow(service: card.service, planLabel: label) {
-                // Ultra has no 5-hour cap: the weekly window is the only one
-                // that can block, so a session meter must not lead the card.
-                labelled.limits.removeAll { $0.kind == .session }
-            }
             return labelled
         }
     }
