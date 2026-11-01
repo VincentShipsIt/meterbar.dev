@@ -451,7 +451,8 @@ nonisolated enum StatusItemLabelFormatter {
         size: StatusItemLabelSize,
         state: StatusItemDataState,
         showsExhaustedResetCountdown: Bool,
-        now: Date
+        now: Date,
+        currency: Bool = false
     ) -> StatusItemFormattedValue {
         guard metric != .iconOnly else {
             return StatusItemFormattedValue(visible: nil, spoken: nil)
@@ -474,7 +475,7 @@ nonisolated enum StatusItemLabelFormatter {
         case .unlimited:
             return StatusItemFormattedValue(visible: "Unlimited", spoken: "unlimited credits")
         case .remainder, .allowance:
-            let amount = limit.formattedCreditRemainder
+            let amount = limit.formattedRemainder(asCurrency: currency)
             return StatusItemFormattedValue(visible: amount, spoken: "\(amount) in credits")
         case .measured:
             break

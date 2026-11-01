@@ -134,6 +134,16 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
     /// provider. Kimi Code's plan has no status page of its own that MeterBar
     /// has verified, so it is left out of the status surfaces rather than
     /// pointed at a neighbouring product's page.
+    /// Providers whose limit windows are dollar amounts rather than a request
+    /// or token quota. Shared so the app, widget and status item agree on
+    /// whether a balance is money.
+    public var usesCurrencyValueStyle: Bool {
+        switch self {
+        case .openRouter, .githubCopilot, .claudePlatform: return true
+        case .claudeCode, .codexCli, .xai, .kimiCode, .zaiCodingPlan, .museCode: return false
+        }
+    }
+
     public var hasStatusPage: Bool {
         switch self {
         case .claudeCode, .codexCli, .xai, .openRouter, .githubCopilot: return true

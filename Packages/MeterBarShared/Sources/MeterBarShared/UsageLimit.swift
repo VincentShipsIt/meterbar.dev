@@ -91,6 +91,13 @@ public struct UsageLimit: Codable, Equatable, Sendable {
         CreditQuantityFormat.grouped(max(0, total - used))
     }
 
+    /// Leftover amount for a remainder or allowance, in the unit the limit is
+    /// drawn in: dollars with cents for a currency-styled limit (an OpenRouter
+    /// or Claude Platform balance), a grouped credit count otherwise.
+    public func formattedRemainder(asCurrency: Bool) -> String {
+        asCurrency ? UsageAmountFormat.currency(max(0, total - used)) : formattedCreditRemainder
+    }
+
     private enum CodingKeys: String, CodingKey {
         case used
         case total
