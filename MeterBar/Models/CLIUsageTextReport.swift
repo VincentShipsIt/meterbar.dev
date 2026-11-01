@@ -106,7 +106,7 @@ nonisolated public enum CLIUsageTextReport {
         case .unlimited:
             return ["\(label): Unlimited credits"]
         case .remainder:
-            return ["\(label): \(limit.formattedCreditRemainder) left"]
+            return ["\(label): \(limit.formattedRemainder(asCurrency: currency)) left"]
         case .allowance:
             let percent = 100 - limit.percentage
             let bar = progressBar(percent: percent, width: 20)

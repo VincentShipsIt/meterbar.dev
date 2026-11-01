@@ -3,10 +3,21 @@ import XCTest
 @testable import MeterBar
 
 final class PlanLabelTests: XCTestCase {
-    func testClaudeMaxCarriesTheTierMultiplier() {
+    func testClaudeTopTierIsNowUltra() {
+        // Nov 2026 rename: the old Max 20x is Ultra, the old Max 5x is Max.
         XCTAssertEqual(
             PlanLabel.make(service: .claudeCode, token: "max", rateLimitTier: "default_claude_max_20x"),
-            "Max 20x"
+            "Ultra"
+        )
+        XCTAssertEqual(
+            PlanLabel.make(service: .claudeCode, token: "max", rateLimitTier: "default_claude_max_5x"),
+            "Max"
+        )
+        XCTAssertEqual(PlanLabel.make(service: .claudeCode, token: "max"), "Max")
+        XCTAssertEqual(PlanLabel.make(service: .claudeCode, token: "ultra"), "Ultra")
+        XCTAssertEqual(
+            PlanLabel.make(service: .claudeCode, token: "ULTRA", rateLimitTier: "default_claude_max_20x"),
+            "Ultra"
         )
         XCTAssertEqual(
             PlanLabel.make(service: .claudeCode, token: "pro", rateLimitTier: "default_claude_ai"),
@@ -23,6 +34,30 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code High Usage"), "High")
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code Power Usage"), "Power")
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code Maximum Usage"), "Maximum")
+    }
+
+    func testUltraCardShowsWhateverWindowsTheServerReports() {
+        // Verified Ultra accounts get no session window from the server;
+        // unverified ones keep a temporary one, which must stay visible.
+        let weekly = UsageLimit(used: 52, total: 100, resetTime: nil, windowSeconds: 7 * 86_400)
+        let session = UsageLimit(used: 40, total: 100, resetTime: nil, windowSeconds: 5 * 3_600)
+        func card(_ metrics: UsageMetrics) -> ProviderSnapshot? {
+            var input = ProviderSnapshotBuilder.Input(
+                metrics: [:],
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [ClaudeCodeAccount.defaultID: metrics],
+                enabledServices: [.claudeCode]
+            )
+            input.planLabels = [.claudeCode: "Ultra"]
+            return ProviderSnapshotBuilder.snapshots(input).first { $0.service == .claudeCode }
+        }
+
+        let verified = card(UsageMetrics(service: .claudeCode, weeklyLimit: weekly))
+        XCTAssertEqual(verified?.planLabel, "Ultra")
+        XCTAssertEqual(verified?.limits.map(\.kind), [.weekly])
+
+        let unverified = card(UsageMetrics(service: .claudeCode, sessionLimit: session, weeklyLimit: weekly))
+        XCTAssertEqual(unverified?.limits.map(\.kind), [.session, .weekly])
     }
 
     func testEmptyTokenYieldsNoLabel() {

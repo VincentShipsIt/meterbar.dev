@@ -29,9 +29,9 @@ nonisolated struct XAISettingsSummary: Equatable, Sendable {
         }
     }
 
-    /// One label for both sources. Grok's billing tier ("SuperGrok Heavy") is
-    /// the more specific name, so it wins; Cursor's coarser token ("ultra") is
-    /// only the fallback.
+    /// One label for both sources. Grok's billing tier (already mapped to its
+    /// X Subscription name, e.g. "Ultra") wins; Cursor's coarser token
+    /// ("ultra") is only the fallback.
     var planLabel: String? {
         if grokConnected, let plan = grokPlan?.nilIfEmpty {
             return plan

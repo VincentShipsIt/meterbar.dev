@@ -83,13 +83,19 @@ final class ProviderSettingsFactsTests: XCTestCase {
 
     // MARK: - planText
 
-    func testClaudePlanJoinsSubscriptionAndTier() {
-        let derived = facts(
+    func testClaudePlanUsesTheRenamedPlanForTheTier() {
+        let ultra = facts(
             service: .claudeCode,
             subscriptionType: "max",
             rateLimitTier: "default_max_20x"
         )
-        XCTAssertEqual(derived.planText, "Max · Default Max 20X")
+        XCTAssertEqual(ultra.planText, "Ultra")
+        let max = facts(
+            service: .claudeCode,
+            subscriptionType: "max",
+            rateLimitTier: "default_claude_max_5x"
+        )
+        XCTAssertEqual(max.planText, "Max")
     }
 
     func testClaudePlanIsNilWhenNothingReported() {

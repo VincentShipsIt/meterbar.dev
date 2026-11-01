@@ -156,7 +156,7 @@ public struct WidgetPresentationRow: Identifiable, Equatable, Sendable {
         case .unlimited:
             return "Unlimited credits"
         case .remainder, .allowance:
-            return "\(limit.formattedCreditRemainder) left"
+            return "\(limit.formattedRemainder(asCurrency: service.usesCurrencyValueStyle)) left"
         case .measured:
             break
         }
