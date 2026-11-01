@@ -120,7 +120,7 @@ final class GrokCLIUsageService: ObservableObject {
             accountErrors.removeValue(forKey: account.id)
             if account.isDefault {
                 hasAccess = true
-                subscriptionType = result.subscriptionTier
+                subscriptionType = result.planName
             }
             return metrics
         } catch {
@@ -493,6 +493,12 @@ nonisolated struct GrokBillingResult: Decodable, Sendable {
             container,
             ["subscriptionTier", "tier", "plan", "planName"]
         )
+    }
+
+    /// The plan as xAI names it today. The CLI still reports retired SuperGrok
+    /// SKU names for X Subscription plans; see `XSubscriptionPlanName`.
+    var planName: String? {
+        XSubscriptionPlanName.current(for: subscriptionTier)
     }
 }
 
