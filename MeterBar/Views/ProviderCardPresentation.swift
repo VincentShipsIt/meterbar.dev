@@ -63,7 +63,7 @@ enum ProviderCardPresentation {
         if let primary = snapshot.primaryLimit {
             switch primary.usageLimit.reading {
             case .remainder, .allowance:
-                return LocalizedUsageFormat.amountLeft(primary.usageLimit.formattedCreditRemainder)
+                return LocalizedUsageFormat.amountLeft(primary.formattedRemainder)
             case .unlimited:
                 return "Unlimited credits"
             case .measured:

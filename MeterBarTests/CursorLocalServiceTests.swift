@@ -158,7 +158,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.weeklyLimit?.isEstimated, true)
     }
 
-    func testMapSummaryOmitsSessionLimitWhenOnDemandDisabled() throws {
+    func testMapSummaryOmitsOnDemandLimitWhenOnDemandDisabled() throws {
         let json = """
         {
           "individualUsage": {
@@ -168,6 +168,23 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
         let metrics = CursorUsageParser.metrics(try decodeSummary(json))
+        // On-demand spend is routed to the code-review window; disabled spend
+        // must not produce one even when used/limit are populated.
+        XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertNil(metrics.sessionLimit)
+    }
+
+    func testMapSummaryOmitsOnDemandLimitWhenEnabledFlagMissing() throws {
+        let json = """
+        {
+          "individualUsage": {
+            "plan": { "used": 10, "total": 500 },
+            "onDemand": { "used": 5, "limit": 20 }
+          }
+        }
+        """
+        let metrics = CursorUsageParser.metrics(try decodeSummary(json))
+        XCTAssertNil(metrics.codeReviewLimit)
         XCTAssertNil(metrics.sessionLimit)
     }
 
@@ -187,7 +204,7 @@ final class CursorLocalServiceTests: XCTestCase {
         XCTAssertEqual(metrics.codeReviewLimit?.isEstimated, true)
     }
 
-    func testMapSummaryOmitsSessionLimitWhenOnDemandAllZero() throws {
+    func testMapSummaryOmitsOnDemandLimitWhenOnDemandAllZero() throws {
         let json = """
         {
           "individualUsage": {
@@ -197,6 +214,7 @@ final class CursorLocalServiceTests: XCTestCase {
         }
         """
         let metrics = CursorUsageParser.metrics(try decodeSummary(json))
+        XCTAssertNil(metrics.codeReviewLimit)
         XCTAssertNil(metrics.sessionLimit)
     }
 

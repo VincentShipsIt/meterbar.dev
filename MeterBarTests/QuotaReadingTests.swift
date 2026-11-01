@@ -120,4 +120,22 @@ final class QuotaReadingTests: XCTestCase {
         XCTAssertEqual(metrics.quotaReading(for: .weekly, account: account), .unavailable(.parseDrift))
         XCTAssertTrue(ProviderSnapshotBuilder.limits(for: metrics, account: account).isEmpty)
     }
+
+    func testFormattedRemainderSpeaksTheLimitsUnit() {
+        let balance = UsageLimit(used: 0, total: 12.5, resetTime: nil, reading: .remainder)
+        XCTAssertEqual(balance.formattedRemainder(asCurrency: true), "$12.50")
+        XCTAssertEqual(balance.formattedRemainder(asCurrency: false), "12.5")
+
+        let empty = UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder)
+        XCTAssertEqual(empty.formattedRemainder(asCurrency: true), "$0.00")
+        XCTAssertEqual(empty.formattedRemainder(asCurrency: false), "0")
+
+        let overspent = UsageLimit(used: 4, total: 0, resetTime: nil, reading: .remainder)
+        XCTAssertEqual(overspent.formattedRemainder(asCurrency: true), "$0.00")
+    }
+
+    func testOnlyDollarProvidersUseTheCurrencyValueStyle() {
+        let currency = ServiceType.allCases.filter(\.usesCurrencyValueStyle)
+        XCTAssertEqual(Set(currency), [.openRouter, .githubCopilot, .claudePlatform])
+    }
 }

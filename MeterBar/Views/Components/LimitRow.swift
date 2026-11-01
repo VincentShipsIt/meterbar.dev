@@ -258,7 +258,7 @@ extension LimitRow {
             case .unlimited:
                 return "Unlimited credits"
             case .remainder, .allowance:
-                return LocalizedUsageFormat.amountLeft(limit.usageLimit.formattedCreditRemainder)
+                return LocalizedUsageFormat.amountLeft(limit.formattedRemainder)
             case .measured:
                 break
             }

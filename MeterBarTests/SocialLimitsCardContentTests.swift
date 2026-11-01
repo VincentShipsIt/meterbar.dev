@@ -140,6 +140,18 @@ final class SocialLimitsCardContentTests: XCTestCase {
         XCTAssertEqual(rows[1].usedFraction, 0.2, accuracy: 0.001)
     }
 
+    func testCurrencyRemainderShowsDollarsOnTheCard() {
+        let row = SocialLimitsCardContent.row(for: snapshotLimit(
+            kind: .weekly,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder),
+            valueStyle: .currency
+        ))
+
+        XCTAssertEqual(row.trailingText, "$0.00 left")
+        XCTAssertEqual(row.heroValueText, "$0.00")
+    }
+
     func testZeroTotalAllowanceDoesNotDrawAFullRemainingBar() {
         let row = SocialLimitsCardContent.row(for: snapshotLimit(
             kind: .additional,

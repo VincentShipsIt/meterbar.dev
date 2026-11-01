@@ -263,6 +263,46 @@ final class LocalizationResourceContractTests: XCTestCase {
         XCTAssertTrue(reservedTokens.isDisjoint(with: catalogKeys))
     }
 
+    /// Xcode's string extraction copies Swift's `\` line continuations into
+    /// the catalog verbatim, and the catalog value wins at runtime, so the
+    /// Muse notice once showed literal backslashes and hard line breaks.
+    func testMuseConnectionNoticeHasNoVisibleLineContinuations() throws {
+        let notice = try englishValue(
+            for: "settings.muse.notice",
+            in: strings(in: loadCatalog(at: appCatalogURL))
+        )
+        XCTAssertFalse(notice.contains("\\"), notice)
+        XCTAssertFalse(notice.contains("\n"), notice)
+        XCTAssertTrue(notice.contains("for the Muse Code quota."), notice)
+        XCTAssertTrue(notice.contains("choose Always Allow"), notice)
+        XCTAssertTrue(notice.contains("A fresh `muse login` can require allowing access again."), notice)
+    }
+
+    func testNoCatalogValueCarriesASwiftLineContinuation() throws {
+        for url in [appCatalogURL, widgetCatalogURL] {
+            for (key, entry) in try strings(in: loadCatalog(at: url)) {
+                for value in stringValues(in: entry) {
+                    XCTAssertFalse(value.contains("\\\n"), "\(key) in \(url.lastPathComponent): \(value)")
+                }
+            }
+        }
+    }
+
+    /// Every `value` string nested anywhere under a catalog entry: plain
+    /// string units and plural/device variations alike.
+    private func stringValues(in node: Any) -> [String] {
+        if let dictionary = node as? [String: Any] {
+            return dictionary.flatMap { key, child -> [String] in
+                if key == "value", let value = child as? String { return [value] }
+                return stringValues(in: child)
+            }
+        }
+        if let array = node as? [Any] {
+            return array.flatMap { stringValues(in: $0) }
+        }
+        return []
+    }
+
     private func loadCatalog(at url: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: url)
         return try XCTUnwrap(
