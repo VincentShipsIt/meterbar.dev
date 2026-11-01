@@ -217,7 +217,7 @@ extension SocialLimitsCardContent {
             case .unlimited:
                 return "Unlimited credits"
             case .remainder, .allowance:
-                return "\(CreditQuantityFormat.grouped(remainingAmount)) left"
+                return "\(remainderText) left"
             case .measured:
                 break
             }
@@ -226,6 +226,17 @@ extension SocialLimitsCardContent {
                 return "\(UsageFormat.cost(remainingAmount)) left"
             case .quota:
                 return (isOut && !isEstimated) ? "Out" : percentLeftText
+            }
+        }
+
+        /// Leftover amount for a remainder or allowance reading, in the
+        /// row's unit: dollars with cents for currency, credits otherwise.
+        private var remainderText: String {
+            switch valueStyle {
+            case .currency:
+                return UsageFormat.cost(remainingAmount)
+            case .quota:
+                return CreditQuantityFormat.grouped(remainingAmount)
             }
         }
 
@@ -276,7 +287,7 @@ extension SocialLimitsCardContent {
             case .unlimited:
                 return "Unlimited"
             case .remainder, .allowance:
-                return CreditQuantityFormat.grouped(remainingAmount)
+                return remainderText
             case .measured:
                 break
             }

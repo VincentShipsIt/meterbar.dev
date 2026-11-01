@@ -27,7 +27,9 @@ enum WidgetLocalizedContent {
         case .unlimited:
             return "Unlimited credits"
         case .remainder, .allowance:
-            return LocalizedUsageFormat.amountLeft(limit.formattedCreditRemainder)
+            return LocalizedUsageFormat.amountLeft(
+                limit.formattedRemainder(asCurrency: row.service.usesCurrencyValueStyle)
+            )
         case .measured:
             break
         }

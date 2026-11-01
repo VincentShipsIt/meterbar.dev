@@ -104,6 +104,32 @@ final class MenuBarStatusItemPlannerTests: XCTestCase {
         )
     }
 
+    func testCurrencyRemainderShowsDollarsInTheMenuBar() {
+        let openRouter = StatusLimitCandidate(
+            key: "openrouter",
+            pinKey: "openrouter",
+            service: .openRouter,
+            displayName: "OpenRouter",
+            windowName: "Credits",
+            limit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder),
+            lastActivity: nil,
+            isAutoSelectable: true
+        )
+        let codex = StatusLimitCandidate(
+            key: "codex",
+            pinKey: "codex",
+            service: .codexCli,
+            displayName: "Codex",
+            windowName: "Credits",
+            limit: UsageLimit(used: 0, total: 61_586.14, resetTime: nil, reading: .remainder),
+            lastActivity: nil,
+            isAutoSelectable: true
+        )
+
+        XCTAssertEqual(plan([openRouter]).first?.title, " $0.00")
+        XCTAssertEqual(plan([codex]).first?.title, " 61,586.14")
+    }
+
     // MARK: - Merged mode
 
     func testMergedModeProducesExactlyOneItemForTheSelectedQuota() {

@@ -26,7 +26,7 @@ struct ProviderSnapshot: Identifiable {
     /// a `var` only because a defaulted `let` is dropped from the memberwise
     /// initializer entirely, which would leave the builder unable to set it.
     var authNotice: ProviderAuthNotice?
-    /// Account type ("Max 20x", "Pro") when the provider reports one. A `var`
+    /// Account type ("Ultra", "Pro") when the provider reports one. A `var`
     /// for the same memberwise-initializer reason as `authNotice`.
     var planLabel: String?
 
@@ -273,6 +273,12 @@ struct SnapshotLimit: Identifiable {
         usageLimit.rawPercentage
     }
 
+    /// Leftover amount for a remainder or allowance reading, in this limit's
+    /// unit: `$0.00` for a currency-styled balance, `61,586.14` for credits.
+    var formattedRemainder: String {
+        usageLimit.formattedRemainder(asCurrency: valueStyle == .currency)
+    }
+
     var percentLeft: Int {
         QuotaMath.percentLeft(for: usageLimit)
     }
@@ -378,7 +384,7 @@ struct SnapshotLimit: Identifiable {
         case .unlimited:
             return "Unlimited credits"
         case .remainder, .allowance:
-            return "\(usageLimit.formattedCreditRemainder) left"
+            return "\(formattedRemainder) left"
         case .measured:
             break
         }
@@ -396,7 +402,7 @@ struct SnapshotLimit: Identifiable {
         case .unlimited:
             return "Unlimited credits"
         case .remainder, .allowance:
-            return LocalizedUsageFormat.amountLeft(usageLimit.formattedCreditRemainder)
+            return LocalizedUsageFormat.amountLeft(formattedRemainder)
         case .measured:
             break
         }
@@ -1111,16 +1117,5 @@ extension Array where Element == ProviderSnapshot {
             )
         }
         return ProviderRecommendationPlanner.rank(candidates: candidates, now: now)
-    }
-}
-
-extension ServiceType {
-    /// Providers whose limit windows are dollar amounts rather than a request
-    /// or token quota.
-    var usesCurrencyValueStyle: Bool {
-        switch self {
-        case .openRouter, .githubCopilot, .claudePlatform: return true
-        case .claudeCode, .codexCli, .xai, .kimiCode, .zaiCodingPlan, .museCode: return false
-        }
     }
 }

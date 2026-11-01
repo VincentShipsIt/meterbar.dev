@@ -1233,7 +1233,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MeterBar reads the Muse CLI sign-in read-only and asks api.meta.ai for the Muse Code \\\nquota. The Muse CLI owns login and refresh. The first Connect may show a Keychain \\\nprompt — choose Always Allow. Background refresh never prompts. A fresh `muse login` \\\ncan require allowing access again."
+            "value": "MeterBar reads the Muse CLI sign-in read-only and asks api.meta.ai for the Muse Code quota. The Muse CLI owns login and refresh. The first Connect may show a Keychain prompt — choose Always Allow. Background refresh never prompts. A fresh `muse login` can require allowing access again."
           }
         }
       }

@@ -430,17 +430,13 @@ struct ProviderSettingsView: View {
             }
 
             if claudeCodeService.hasAccess {
-                if let subscriptionType = claudeCodeService.subscriptionType {
+                if let plan = PlanLabel.make(
+                    service: .claudeCode,
+                    token: claudeCodeService.subscriptionType,
+                    rateLimitTier: claudeCodeService.rateLimitTier
+                ) {
                     SettingsRowView(title: "Plan") {
-                        Text(subscriptionType.capitalized)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                }
-
-                if let rateLimitTier = claudeCodeService.rateLimitTier {
-                    SettingsRowView(title: "Tier") {
-                        Text(rateLimitTier.replacingOccurrences(of: "_", with: " ").capitalized)
+                        Text(plan)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                     }

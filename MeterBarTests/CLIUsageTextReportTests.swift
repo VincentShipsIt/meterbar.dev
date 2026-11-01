@@ -204,6 +204,28 @@ final class CLIUsageTextReportTests: XCTestCase {
         XCTAssertTrue(text.contains("Daily:"), text)
     }
 
+    func testCurrencyRemainderPrintsDollarsWithCents() {
+        let openRouter = render(
+            .openRouter,
+            metric: UsageMetrics(
+                service: .openRouter,
+                weeklyLimit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder),
+                lastUpdated: referenceDate
+            )
+        )
+        XCTAssertTrue(openRouter.contains(": $0.00 left"), openRouter)
+
+        let platform = render(
+            .claudePlatform,
+            metric: UsageMetrics(
+                service: .claudePlatform,
+                weeklyLimit: UsageLimit(used: 0, total: 50, resetTime: nil, reading: .remainder),
+                lastUpdated: referenceDate
+            )
+        )
+        XCTAssertTrue(platform.contains(": $50.00 left"), platform)
+    }
+
     private func render(_ service: ServiceType, metric: UsageMetrics) -> String {
         CLIUsageTextReport.lines(for: [service: metric]).joined(separator: "\n")
     }

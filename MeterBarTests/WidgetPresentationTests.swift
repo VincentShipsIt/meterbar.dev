@@ -981,6 +981,23 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertFalse(first?.summaryText.contains("%") ?? true)
     }
 
+    func testOpenRouterZeroBalanceWidgetSummaryReadsAsDollars() throws {
+        var preferences = WidgetPreferences.defaults
+        preferences.preservesLegacyOpenRouterBalance = false
+        let result = presentation(
+            metrics: [
+                .openRouter: UsageMetrics(
+                    service: .openRouter,
+                    weeklyLimit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder)
+                )
+            ],
+            preferences: preferences
+        )
+
+        let row = try XCTUnwrap(result.rows.first)
+        XCTAssertEqual(row.summaryText, "$0.00 left")
+    }
+
     private func makeMetrics(
         _ service: ServiceType,
         sessionUsed: Double? = nil,

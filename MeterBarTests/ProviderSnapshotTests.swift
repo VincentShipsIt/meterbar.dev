@@ -1252,6 +1252,84 @@ final class ProviderSnapshotTests: XCTestCase {
         XCTAssertEqual(creditLimit.accessibilityValue, "61,586.14 left")
     }
 
+    /// OpenRouter reports a zero-credit account as a remainder. The balance is
+    /// money, so every surface that names it — the row, the card status and
+    /// both VoiceOver paths — must say `$0.00`, never a unit-less `0`.
+    func testOpenRouterZeroBalanceRemainderReadsAsDollarsEverywhere() throws {
+        let metrics = UsageMetrics(
+            service: .openRouter,
+            weeklyLimit: UsageLimit(used: 0, total: 0, resetTime: nil, reading: .remainder)
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "OpenRouter",
+            service: .openRouter,
+            metrics: metrics,
+            emptyDetail: ""
+        )
+
+        let credit = try XCTUnwrap(snapshot.limits.first { $0.kind == .weekly })
+        XCTAssertEqual(credit.valueStyle, .currency)
+        XCTAssertEqual(credit.formattedRemainder, "$0.00")
+        XCTAssertEqual(LimitRow.RowContent(limit: credit).trailingText, "$0.00 left")
+        XCTAssertEqual(credit.accessibilityValue, "$0.00 left")
+        XCTAssertEqual(credit.localizedAccessibilityValue, "$0.00 left")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: snapshot), "$0.00 left")
+    }
+
+    /// Spending past a zero-credit total must not render a negative balance.
+    func testOpenRouterOverspentRemainderClampsToZeroDollars() throws {
+        let limit = SnapshotLimit(
+            id: "weekly",
+            kind: .weekly,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 3.5, total: 0, resetTime: nil, reading: .remainder),
+            valueStyle: .currency
+        )
+
+        XCTAssertEqual(limit.formattedRemainder, "$0.00")
+        XCTAssertEqual(LimitRow.RowContent(limit: limit).trailingText, "$0.00 left")
+        XCTAssertEqual(limit.accessibilityValue, "$0.00 left")
+    }
+
+    /// A Claude Platform balance without a readable grant is also a dollar
+    /// remainder, and keeps cent precision.
+    func testClaudePlatformBalanceRemainderKeepsCents() throws {
+        let metrics = UsageMetrics(
+            service: .claudePlatform,
+            weeklyLimit: UsageLimit(used: 0, total: 1_234.5, resetTime: nil, reading: .remainder)
+        )
+        let snapshot = ProviderSnapshotBuilder.snapshot(
+            title: "Claude Platform",
+            service: .claudePlatform,
+            metrics: metrics,
+            emptyDetail: ""
+        )
+
+        let balance = try XCTUnwrap(snapshot.limits.first { $0.kind == .weekly })
+        XCTAssertEqual(balance.valueStyle, .currency)
+        XCTAssertEqual(LimitRow.RowContent(limit: balance).trailingText, "$1,234.50 left")
+        XCTAssertEqual(balance.accessibilityValue, "$1,234.50 left")
+        XCTAssertEqual(balance.localizedAccessibilityValue, "$1,234.50 left")
+        XCTAssertEqual(ProviderCardPresentation.statusText(for: snapshot), "$1,234.50 left")
+    }
+
+    /// Quota-styled credit counts (Codex) are not money and keep their
+    /// grouped credit formatting with no currency symbol.
+    func testQuotaStyledRemainderKeepsCreditFormatting() {
+        let limit = SnapshotLimit(
+            id: "credits",
+            kind: .additional,
+            title: "Credits",
+            usageLimit: UsageLimit(used: 0, total: 61_586.14, resetTime: nil, reading: .remainder)
+        )
+
+        XCTAssertEqual(limit.valueStyle, .quota)
+        XCTAssertEqual(limit.formattedRemainder, "61,586.14")
+        XCTAssertEqual(LimitRow.RowContent(limit: limit).trailingText, "61,586.14 left")
+        XCTAssertEqual(limit.accessibilityValue, "61,586.14 left")
+        XCTAssertEqual(limit.localizedAccessibilityValue, "61,586.14 left")
+    }
+
     func testCreditAllowanceUsesARemainingBarAndWeeklyQuotaStaysPrimary() throws {
         let allowance = ProviderSnapshotBuilder.snapshot(
             title: "Codex",

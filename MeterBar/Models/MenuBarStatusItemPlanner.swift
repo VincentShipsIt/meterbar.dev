@@ -403,7 +403,8 @@ enum MenuBarStatusItemPlanner {
             size: context.size,
             state: dataState(for: candidate, now: context.now),
             showsExhaustedResetCountdown: context.showsExhaustedResetCountdown,
-            now: context.now
+            now: context.now,
+            currency: candidate.service.usesCurrencyValueStyle
         )
     }
 
