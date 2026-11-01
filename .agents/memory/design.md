@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-09-29
+last_verified: 2026-11-01
 status: active
 ---
 
@@ -26,9 +26,11 @@ Glass is the **chrome** layer (menu bar, popover, toolbar, sidebar, occasional f
 ## Shape and hierarchy
 
 - Concentric corners: `Radius.shell` (24) minus the popover inset (`Spacing.md`, 12) equals `Radius.card` (12). Change one, change the others.
-- Popover status dots, Stay Awake, and dashboard/refresh actions share one 30pt row in a bottom `safeAreaInset`, aligned to the provider cards through `MenuBarPopoverGeometry.cardInset`. `chromeHeight` is the footer height; scroll feedback ends above it.
-- Provider card headers keep name and freshness on the left; plan and status badges align at the trailing edge.
-- Popover quota donuts share one row with short labels below them; reset countdowns belong in hover details. Claude model windows precede the adjacent Session and Weekly windows.
+- Popover is **Tiles** (2026-11-01, Control Center style). The tightest measured provider is a wide hero tile; the rest share a two-column grid in display order (`PopoverTileLayout`). A blocked account with a banked reset keeps the full `ProviderStatusCard` so its reset-credit action stays reachable.
+- Stay Awake and provider status are tiles under the providers (`PopoverControlTiles`). No glass pills. The bottom `safeAreaInset` is one plain text line: freshness left, refresh icon and "Open dashboard" right. `chromeHeight` is that line's height.
+- Every figure names its direction: "52% left" / "48% used", never a bare percent. A bare number beside a ring was misread as usage.
+- Right-click a tile: "Add to desktop as widget…" (macOS cannot place widgets itself; it explains the widget gallery and reloads timelines), "Float on screen" (an always-on-top panel, persisted, restored at launch), then the card commands.
+- Tiles are content cards (`DashboardTile`, `Radius.card`), never nested inside another card. Hover window tiles are separate surfaces, not tiles inside a card.
 - Hover details grow within the available screen height independently of the main popover cap. One shared viewport scrolls only overflowing content, so the final footer stays reachable.
 - Usage hovers end with one compact footer: Extra usage and its read-only switch on the left, service health and its status-page link on the right, using the popover status monitor. Either side can appear alone; omit the footer when neither exists. Banked resets and peak/off-peak information remain above it.
 - Labels, section headers, table column headers and status chips are sentence case, never `.uppercased()` / `.textCase(.uppercase)`. Share-card artwork is the exception.
@@ -45,7 +47,7 @@ System SF via SwiftUI font APIs. Regular or heavier on materials. Letter spacing
 
 - Companion: native `NavigationSplitView` sidebar `List`; content `ScrollView` ~22px padding.
 - Settings: `Form` + `.formStyle(.grouped)`.
-- Popover: one dense overview, not a tab strip.
+- Popover: one tile overview, not a tab strip.
 - Usage bars are remaining-mode: full bar = 100% left. Red segment is the quota that should still exist if usage were on pace.
 
 ## Controls

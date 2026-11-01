@@ -4,5 +4,8 @@
 public enum MeterBarWidgetKind {
     public static let usage = "UsageWidget"
     public static let burnDown = "BurnDownWidget"
-    public static let all = [usage, burnDown]
+    /// Control Center style tiles, matching the popover: the tightest limit
+    /// on the small size, every provider side by side on the medium.
+    public static let tiles = "TilesWidget"
+    public static let all = [usage, burnDown, tiles]
 }

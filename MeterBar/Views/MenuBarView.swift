@@ -194,6 +194,13 @@ struct MenuBarView: View {
           showsRoutingLine: true
         )
 
+        // Stay Awake and provider status are tiles beside the providers,
+        // not pills in a footer.
+        PopoverControlTiles(
+          openStatusDetail: openStatusDetail,
+          hoverStatusDetail: hoverStatusDetailChanged
+        )
+
         if SessionWakeMenuControl.shouldShow(
           featureEnabled: sessionWakeStore.featureEnabled,
           isOn: sessionWakeStore.isOn,
@@ -291,55 +298,15 @@ struct MenuBarView: View {
     )
   }
 
+  /// Freshness on the left; refresh and the dashboard as plain text actions.
   private var popoverFooter: some View {
-    HStack(spacing: 8) {
-      PopoverStatusDots(
-        openDetail: openStatusDetail,
-        hoverChanged: hoverStatusDetailChanged
-      )
-      .reportPopoverCardFrame(id: PopoverCardID.providerStatus)
-
-      Spacer(minLength: 0)
-
-      StayAwakeMenuControl()
-
-      Spacer(minLength: 0)
-
-      // Dashboard + Refresh fused into one glass capsule (were two separate glass
-      // circles) so the footer actions read as a single pill, matching the
-      // status-dots pill on the left.
-      HStack(spacing: 2) {
-        Button(action: openDashboard) {
-          Image(systemName: MenuBarOverlayIcons.dashboard)
-            .font(.system(size: 12, weight: .semibold))
-            .frame(width: 32, height: 30)
-            .contentShape(Rectangle())
-            .accessibilityHidden(true)
-        }
-        .buttonStyle(.plain)
-        .help("Open Usage Dashboard")
-        .accessibilityLabel("Open Dashboard")
-
-        Button {
-          Task { await dataManager.refreshForExplicitAction(.manualRefresh) }
-        } label: {
-          RefreshingIcon(isRefreshing: dataManager.isLoading)
-            .font(.system(size: 12, weight: .semibold))
-            .frame(width: 32, height: 30)
-            .contentShape(Rectangle())
-            .accessibilityHidden(true)
-        }
-        .buttonStyle(.plain)
-        .help(dataManager.isLoading ? "Refreshing usage" : "Refresh usage (⌘R)")
-        .accessibilityLabel("Refresh")
-        .accessibilityValue(dataManager.isLoading ? "Refreshing" : "")
-        .meterBarRefreshShortcut()
-        .disabled(dataManager.isLoading)
-      }
-      .glassEffect(.regular.interactive(), in: .capsule)
-    }
-    .font(.body)
-    .padding(.horizontal, MenuBarPopoverGeometry.cardInset)
+    PopoverFooterLine(
+      updatedAt: snapshots.compactMap(\.updatedAt).max(),
+      isRefreshing: dataManager.isLoading,
+      refresh: { Task { await dataManager.refreshForExplicitAction(.manualRefresh) } },
+      openDashboard: openDashboard
+    )
+    .padding(.horizontal, MenuBarPopoverGeometry.cardInset + MeterBarTheme.Spacing.xs)
     .padding(.bottom, MenuBarPopoverGeometry.cardGap)
   }
 
@@ -487,10 +454,6 @@ struct MenuBarView: View {
     window.backgroundColor = .clear
     window.hasShadow = false
   }
-}
-
-private enum MenuBarOverlayIcons {
-  static let dashboard = "rectangle.split.2x1"
 }
 
 private struct DetailHeightPreferenceKey: PreferenceKey {

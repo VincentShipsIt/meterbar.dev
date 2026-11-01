@@ -100,6 +100,8 @@ struct CardDisclosureChevron: View {
 /// view host. Mirrors/extends the hidden status-item NSMenu.
 struct ProviderCardCommand: Identifiable {
     enum Kind: String, CaseIterable {
+        case addToDesktop
+        case floatOnScreen
         case refresh
         case openStatusPage
         case hide
@@ -121,10 +123,38 @@ enum ProviderCardCommands {
         refresh: @escaping (ServiceType) -> Void,
         openStatusPage: @escaping (ServiceType) -> Void,
         hide: @escaping (ServiceType) -> Void,
-        openInDashboard: @escaping () -> Void
+        openInDashboard: @escaping () -> Void,
+        addToDesktop: (() -> Void)? = nil,
+        floatOnScreen: ((String) -> Void)? = nil
     ) -> [ProviderCardCommand] {
         let service = snapshot.service
-        return [
+        let snapshotID = snapshot.id
+        var commands: [ProviderCardCommand] = []
+        // The tile's own placements lead: they are what right-click is for in
+        // the popover. Callers that pass neither keep the original four.
+        if let addToDesktop {
+            commands.append(
+                ProviderCardCommand(
+                    id: .addToDesktop,
+                    title: "Add to desktop as widget…",
+                    systemImage: "rectangle.3.group",
+                    isDestructive: false,
+                    action: addToDesktop
+                )
+            )
+        }
+        if let floatOnScreen {
+            commands.append(
+                ProviderCardCommand(
+                    id: .floatOnScreen,
+                    title: "Float on screen",
+                    systemImage: "pin",
+                    isDestructive: false,
+                    action: { floatOnScreen(snapshotID) }
+                )
+            )
+        }
+        return commands + [
             ProviderCardCommand(
                 id: .refresh,
                 title: "Refresh this provider",
@@ -183,7 +213,9 @@ enum ProviderCardCommands {
                     section: .limits,
                     focusedProviderID: snapshot.id
                 )
-            }
+            },
+            addToDesktop: { DesktopWidgetGuide.present() },
+            floatOnScreen: { id in FloatingTileController.shared.float(snapshotID: id) }
         )
     }
 }

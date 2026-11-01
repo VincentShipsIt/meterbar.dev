@@ -212,17 +212,7 @@ struct PopoverOverviewPanel: View {
                     .transition(MeterBarTheme.Motion.popoverTile)
             }
 
-            VStack(spacing: MenuBarPopoverGeometry.cardGap) {
-                ForEach(normalSnapshots) { snapshot in
-                    ProviderStatusCard(
-                        snapshot: snapshot,
-                        onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
-                        onSelect: { openProviderOverview(snapshot) }
-                    )
-                    .reportPopoverCardFrame(id: snapshot.id)
-                    .transition(MeterBarTheme.Motion.popoverTile)
-                }
-            }
+            providerTiles
         }
         .animation(
             MeterBarTheme.Motion.resolve(MeterBarTheme.Motion.standard, reduceMotion: reduceMotion),
@@ -231,6 +221,68 @@ struct PopoverOverviewPanel: View {
         .task(id: readinessInputKey) {
             await loadSetupReports()
         }
+    }
+
+    /// The tightest provider leads as the wide hero tile; the rest share a
+    /// two-column grid in display order. See `PopoverTileLayout`.
+    private var providerTiles: some View {
+        let fullCards = normalSnapshots.filter(Self.keepsFullCard)
+        let tiles = normalSnapshots.filter { !Self.keepsFullCard($0) }
+        let plan = PopoverTileLayout.plan(for: tiles)
+        let hero = tiles.first { $0.id == plan.heroID }
+        let grid = plan.gridIDs.compactMap { id in tiles.first { $0.id == id } }
+        return VStack(spacing: MenuBarPopoverGeometry.cardGap) {
+            // A blocked account with a banked reset keeps the full card: its
+            // "Use reset credit" action and confirmation live there.
+            ForEach(fullCards) { snapshot in
+                ProviderStatusCard(
+                    snapshot: snapshot,
+                    onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
+                    onSelect: { openProviderOverview(snapshot) }
+                )
+                .reportPopoverCardFrame(id: snapshot.id)
+                .transition(MeterBarTheme.Motion.popoverTile)
+            }
+            if let hero {
+                providerTile(hero, style: .hero)
+            }
+            let rows = Self.gridRows(grid)
+            ForEach(0..<rows.count, id: \.self) { index in
+                HStack(alignment: .top, spacing: MenuBarPopoverGeometry.cardGap) {
+                    ForEach(rows[index]) { snapshot in
+                        providerTile(snapshot, style: .compact)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
+                    if rows[index].count == 1 {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Pairs of tiles, so both tiles in a row share one height.
+    static func gridRows(_ snapshots: [ProviderSnapshot]) -> [[ProviderSnapshot]] {
+        stride(from: 0, to: snapshots.count, by: 2).map { start in
+            Array(snapshots[start..<min(start + 2, snapshots.count)])
+        }
+    }
+
+    static func keepsFullCard(_ snapshot: ProviderSnapshot) -> Bool {
+        snapshot.hasExhaustedLimit && (snapshot.resetCreditsAvailable ?? 0) > 0
+    }
+
+    private func providerTile(_ snapshot: ProviderSnapshot, style: ProviderTile.Style) -> some View {
+        ProviderTile(
+            snapshot: snapshot,
+            style: style,
+            commands: ProviderCardCommands.standard(snapshot: snapshot),
+            onHoverChange: hoverProviderOverview.map { change in { change(snapshot, $0) } },
+            onSelect: { openProviderOverview(snapshot) }
+        )
+        .reportPopoverCardFrame(id: snapshot.id)
+        .transition(MeterBarTheme.Motion.popoverTile)
     }
 
     private var errorGroup: some View {

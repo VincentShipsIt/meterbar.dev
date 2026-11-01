@@ -11,6 +11,7 @@ import SwiftUI
 @main
 struct MeterBarWidgetBundle: WidgetBundle {
     var body: some Widget {
+        TilesWidget()
         UsageWidget()
         BurnDownWidget()
     }

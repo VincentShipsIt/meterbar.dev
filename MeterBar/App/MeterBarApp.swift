@@ -143,6 +143,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItemIDs = [MenuBarStatusItemPlanner.mergedItemID]
         observeStayAwakeStatusItem()
+        // Tiles the user floated last session come back where they left them.
+        FloatingTileController.shared.restore()
 
         menuPanel = MeterBarMenuPanelController(
             statusButtonProvider: { [weak self] in
