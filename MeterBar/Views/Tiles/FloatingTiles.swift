@@ -138,6 +138,11 @@ final class FloatingTileController {
         }
     }
 
+    /// True when any part of `frame` lies on one of `screens`.
+    static func isReachable(_ frame: CGRect, on screens: [CGRect]) -> Bool {
+        screens.contains { $0.intersects(frame) }
+    }
+
     private func present(snapshotID: String) {
         let panel = FloatingTilePanel(
             contentRect: CGRect(origin: .zero, size: Self.tileSize),
@@ -161,7 +166,10 @@ final class FloatingTileController {
         )
 
         let autosaveName = "MeterBarFloatingTile-\(snapshotID)"
-        if !panel.setFrameUsingName(autosaveName) {
+        // A saved frame on a display that is no longer connected would leave the
+        // tile unreachable but still counted toward the limit.
+        let restored = panel.setFrameUsingName(autosaveName)
+        if !restored || !Self.isReachable(panel.frame, on: NSScreen.screens.map(\.visibleFrame)) {
             let visible = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1_440, height: 900)
             let origin = FloatingTileRegistry.defaultOrigin(
                 index: panels.count,
@@ -192,7 +200,7 @@ struct FloatingTileView: View {
     var body: some View {
         LiveProviderSnapshotsReader { snapshots in
             ZStack(alignment: .topTrailing) {
-                if let snapshot = snapshots.first(where: { $0.id == snapshotID }) {
+                if let snapshot = snapshots.first(where: { $0.stableKey == snapshotID }) {
                     ProviderTile(snapshot: snapshot, style: .floating)
                         .contextMenu {
                             Button("Open in Dashboard") {
@@ -248,7 +256,7 @@ enum DesktopWidgetGuide {
     static let informativeText = """
         Right-click an empty spot on your desktop and choose Edit Widgets. \
         Search for MeterBar and drag the Tiles widget onto the desktop. \
-        The small size shows your tightest limit; the medium size shows every provider.
+        The small size shows your tightest limit; the medium size shows the tightest providers that fit.
         """
 
     static func present() {

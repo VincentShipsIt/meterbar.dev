@@ -75,6 +75,12 @@ struct PopoverTileContent: Equatable {
             fractionLeft = usage.total > 0 ? min(1, max(0, 1 - usage.rawPercentage / 100)) : nil
             headline = LocalizedUsageFormat.percentLeft(usage)
             usedText = LocalizedUsageFormat.percentUsed(usage)
+        } else if usage.reading == .measured, primary.valueStyle == .currency {
+            // Same remainder the limit row shows ("$4.10 left").
+            percentLeft = nil
+            fractionLeft = nil
+            headline = LocalizedUsageFormat.amountLeft(UsageFormat.cost(max(0, usage.total - usage.used)))
+            usedText = LocalizedUsageFormat.amountSpent(UsageFormat.cost(usage.used))
         } else {
             percentLeft = nil
             fractionLeft = nil

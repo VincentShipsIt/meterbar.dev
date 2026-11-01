@@ -119,7 +119,8 @@ struct ProviderStatusTile: View {
 
     private var summary: ProviderStatusTileSummary {
         ProviderStatusTileSummary(
-            reports: ServiceType.statusPageServices.compactMap { statusMonitor.reports[$0] }
+            reports: ServiceType.statusPageServices.compactMap { statusMonitor.reports[$0] },
+            expectedCount: ServiceType.statusPageServices.count
         )
     }
 
@@ -137,19 +138,20 @@ struct ProviderStatusTile: View {
         .buttonStyle(ProviderCardButtonStyle(cornerRadius: MeterBarTheme.Radius.card))
         .help("Provider status")
         .accessibilityLabel("Provider status")
-        .accessibilityValue(ProviderStatusDotsSummary.text(issueCount: summary.issueCount))
+        .accessibilityValue(summary.text)
         .accessibilityHint("Show provider status details")
         .onHover { hoverChanged?($0) }
         .task { await statusMonitor.refreshAllIfNeeded() }
     }
 }
 
-/// "All operational", "Grok degraded", or "2 issues".
+/// "All operational", "Grok degraded", "2 issues", or "3 of 4 checked" while a
+/// status page has not answered (a missing page is not a healthy one).
 struct ProviderStatusTileSummary: Equatable {
     let text: String
     let issueCount: Int
 
-    init(reports: [ProviderStatusReport]) {
+    init(reports: [ProviderStatusReport], expectedCount: Int? = nil) {
         let issues = reports.filter(\.hasIssue)
         issueCount = issues.count
         if reports.isEmpty {
@@ -158,6 +160,8 @@ struct ProviderStatusTileSummary: Equatable {
             text = "\(only.displayName) \(only.headline.lowercased())"
         } else if issues.count > 1 {
             text = "\(issues.count) issues"
+        } else if let expectedCount, reports.count < expectedCount {
+            text = "\(reports.count) of \(expectedCount) checked"
         } else {
             text = "All operational"
         }

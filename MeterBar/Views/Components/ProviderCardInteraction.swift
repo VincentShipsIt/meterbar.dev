@@ -128,7 +128,7 @@ enum ProviderCardCommands {
         floatOnScreen: ((String) -> Void)? = nil
     ) -> [ProviderCardCommand] {
         let service = snapshot.service
-        let snapshotID = snapshot.id
+        let stableKey = snapshot.stableKey
         var commands: [ProviderCardCommand] = []
         // The tile's own placements lead: they are what right-click is for in
         // the popover. Callers that pass neither keep the original four.
@@ -150,7 +150,7 @@ enum ProviderCardCommands {
                     title: "Float on screen",
                     systemImage: "pin",
                     isDestructive: false,
-                    action: { floatOnScreen(snapshotID) }
+                    action: { floatOnScreen(stableKey) }
                 )
             )
         }

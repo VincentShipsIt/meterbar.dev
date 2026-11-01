@@ -137,6 +137,38 @@ final class PopoverTilesTests: XCTestCase {
     func testOnlyABlockedAccountWithABankedResetKeepsTheFullCard() {
         let healthy = snapshot(title: "Codex", service: .codexCli, weeklyUsed: 10)
         XCTAssertFalse(PopoverOverviewPanel.keepsFullCard(healthy))
+
+        let blocked = ProviderSnapshotBuilder.snapshot(
+            title: "Codex",
+            service: .codexCli,
+            metrics: UsageMetrics(
+                service: .codexCli,
+                weeklyLimit: UsageLimit(used: 100, total: 100, resetTime: now.addingTimeInterval(3_600)),
+                resetCreditsAvailable: 1,
+                lastUpdated: now
+            ),
+            emptyDetail: "No data"
+        )
+        XCTAssertTrue(PopoverOverviewPanel.keepsFullCard(blocked))
+    }
+
+    func testCurrencyLimitShowsTheRemainingAmount() {
+        let content = PopoverTileContent(
+            snapshot: ProviderSnapshotBuilder.snapshot(
+                title: "OpenRouter",
+                service: .openRouter,
+                metrics: UsageMetrics(
+                    service: .openRouter,
+                    weeklyLimit: UsageLimit(used: 5.9, total: 10, resetTime: nil),
+                    lastUpdated: now
+                ),
+                emptyDetail: "No data"
+            ),
+            now: now
+        )
+
+        XCTAssertEqual(content.headline, LocalizedUsageFormat.amountLeft(UsageFormat.cost(4.1)))
+        XCTAssertNil(content.percentLeft, "a balance is not drawn as a percentage ring")
     }
 
     // MARK: - Rendering
@@ -221,6 +253,36 @@ final class PopoverTilesTests: XCTestCase {
             report(.codexCli, indicator: .minor),
         ])
         XCTAssertEqual(several.text, "2 issues")
+
+        let partial = ProviderStatusTileSummary(
+            reports: [report(.claudeCode, indicator: .none)],
+            expectedCount: 3
+        )
+        XCTAssertEqual(partial.text, "1 of 3 checked", "a page that has not answered is not reported healthy")
+        XCTAssertEqual(
+            ProviderStatusTileSummary(reports: [report(.claudeCode, indicator: .none)], expectedCount: 1).text,
+            "All operational"
+        )
+    }
+
+    func testStableKeySurvivesTitleChange() {
+        let original = snapshot(title: "Codex · Work", service: .codexCli, weeklyUsed: 10)
+        let renamed = snapshot(title: "Codex · Office", service: .codexCli, weeklyUsed: 10)
+        XCTAssertNotEqual(original.id, renamed.id)
+        XCTAssertEqual(original.stableKey, renamed.stableKey)
+    }
+
+    func testRestoredFrameMustBeOnAConnectedScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        XCTAssertTrue(FloatingTileController.isReachable(CGRect(x: 100, y: 100, width: 232, height: 76), on: [screen]))
+        XCTAssertFalse(
+            FloatingTileController.isReachable(CGRect(x: 3_000, y: 100, width: 232, height: 76), on: [screen]),
+            "a frame saved on a disconnected display is not reachable"
+        )
+    }
+
+    func testDesktopWidgetGuideDoesNotOverpromise() {
+        XCTAssertFalse(DesktopWidgetGuide.informativeText.contains("every provider"))
     }
 
     func testFooterFreshnessText() {
@@ -255,7 +317,7 @@ final class PopoverTilesTests: XCTestCase {
         commands.first { $0.id == .addToDesktop }?.action()
         commands.first { $0.id == .floatOnScreen }?.action()
         XCTAssertEqual(desktopRequests, 1)
-        XCTAssertEqual(floated, [tile.id], "the floated tile is the one that was right-clicked")
+        XCTAssertEqual(floated, [tile.stableKey], "the floated tile is the one that was right-clicked")
     }
 
     // MARK: - Floating tiles
