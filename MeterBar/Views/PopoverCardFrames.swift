@@ -4,6 +4,14 @@ import SwiftUI
 enum PopoverCardID {
     static let providerErrors = "popover-provider-errors"
     static let providerStatus = "popover-provider-status"
+    /// Stay Awake, Session Wake and the footer: hover sources that own no detail
+    /// panel. Entering one takes hover ownership away from the open panel, so
+    /// the panel closes instead of waiting on the popover-wide "still inside".
+    /// Each has its own ID so a late exit from one cannot clear the next one's
+    /// ownership.
+    static let stayAwake = "popover-control-stay-awake"
+    static let sessionWake = "popover-control-session-wake"
+    static let footer = "popover-control-footer"
 }
 
 /// Live frames (SwiftUI global space) of the popover cards, keyed by card ID,
