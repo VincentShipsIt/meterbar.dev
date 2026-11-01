@@ -10,10 +10,12 @@ import SwiftUI
 struct PopoverControlTiles: View {
     let openStatusDetail: () -> Void
     var hoverStatusDetail: ((Bool) -> Void)?
+    var hoverControl: ((Bool) -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: MenuBarPopoverGeometry.cardGap) {
             StayAwakeTile()
+                .onHover { hoverControl?($0) }
             ProviderStatusTile(openDetail: openStatusDetail, hoverChanged: hoverStatusDetail)
                 .reportPopoverCardFrame(id: PopoverCardID.providerStatus)
         }

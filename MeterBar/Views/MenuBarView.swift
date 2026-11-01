@@ -198,7 +198,8 @@ struct MenuBarView: View {
         // not pills in a footer.
         PopoverControlTiles(
           openStatusDetail: openStatusDetail,
-          hoverStatusDetail: hoverStatusDetailChanged
+          hoverStatusDetail: hoverStatusDetailChanged,
+          hoverControl: hoverControlsChanged
         )
 
         if SessionWakeMenuControl.shouldShow(
@@ -209,6 +210,7 @@ struct MenuBarView: View {
           DashboardTile(padding: .popover) {
             SessionWakeMenuControl()
           }
+          .onHover(perform: hoverControlsChanged)
         }
       }
       .padding([.horizontal, .top], MenuBarPopoverGeometry.cardInset)
@@ -306,6 +308,7 @@ struct MenuBarView: View {
       refresh: { Task { await dataManager.refreshForExplicitAction(.manualRefresh) } },
       openDashboard: openDashboard
     )
+    .onHover(perform: hoverControlsChanged)
     .padding(.horizontal, MenuBarPopoverGeometry.cardInset + MeterBarTheme.Spacing.xs)
     .padding(.bottom, MenuBarPopoverGeometry.cardGap)
   }
@@ -377,6 +380,13 @@ struct MenuBarView: View {
   private func hoverProviderErrorsChanged(_ snapshots: [ProviderSnapshot], isHovered: Bool) {
     hoverOwnership.updateSource(id: PopoverCardID.providerErrors, isHovered: isHovered)
     if isHovered { openProviderErrors(snapshots) }
+    reconcileDetailDismissal()
+  }
+
+  /// Stay Awake, Session Wake and the footer own no detail panel, so pointing at
+  /// one closes whichever panel is open (after the usual short grace period).
+  private func hoverControlsChanged(_ isHovered: Bool) {
+    hoverOwnership.updateSource(id: PopoverCardID.controls, isHovered: isHovered)
     reconcileDetailDismissal()
   }
 

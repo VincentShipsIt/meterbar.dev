@@ -415,6 +415,19 @@ final class PopoverInteractionTests: XCTestCase {
         XCTAssertTrue(ownership.shouldDismiss(detailID: "codex"))
     }
 
+    func testPointingAtAControlClosesTheOpenDetailEvenInsidePopover() {
+        var ownership = PopoverHoverOwnership()
+        ownership.isOverPopover = true
+        ownership.updateSource(id: "codex", isHovered: true)
+        ownership.updateSource(id: "codex", isHovered: false)
+        ownership.updateSource(id: PopoverCardID.controls, isHovered: true)
+        XCTAssertTrue(ownership.shouldDismiss(detailID: "codex"), "a control owns no detail, so Codex closes")
+
+        ownership.updateSource(id: PopoverCardID.controls, isHovered: false)
+        ownership.updateDetail(id: "codex", isHovered: true)
+        XCTAssertFalse(ownership.shouldDismiss(detailID: "codex"), "moving into the detail panel keeps it open")
+    }
+
     func testGapBetweenSourceCardsKeepsCurrentDetailsOpen() {
         var ownership = PopoverHoverOwnership()
         ownership.isOverPopover = true
