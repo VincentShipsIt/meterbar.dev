@@ -83,6 +83,8 @@ final class GrokCLIUsageServiceTests: XCTestCase {
         )
         XCTAssertTrue(metrics.additionalLimits.isEmpty)
         XCTAssertEqual(result.subscriptionTier, "SuperGrok Heavy")
+        // The Grok app and Cursor call this account's plan "Ultra".
+        XCTAssertEqual(result.planName, "Ultra")
     }
 
     func testUsagePeriodsMapOntoSessionAndWeeklyWindowsWithWorkingPace() throws {
@@ -692,6 +694,23 @@ final class GrokCLIUsageServiceTests: XCTestCase {
 
         XCTAssertEqual(defaultMetrics.weeklyLimit?.used, 11)
         XCTAssertEqual(workMetrics.weeklyLimit?.used, 73)
+    }
+
+    func testFetchPublishesTheCurrentXSubscriptionPlanName() async throws {
+        let result = try decodeResult(
+            #"{"config":{"creditUsagePercent":49},"subscription_tier":"SuperGrok Heavy"}"#
+        )
+        let service = GrokCLIUsageService(
+            binaryPathProvider: { "/usr/local/bin/grok" },
+            authAvailableProvider: { _ in true },
+            billingResultProvider: { _, _ in result },
+            authFileDataProvider: { _ in nil },
+            remainingResetsProvider: { _ in nil }
+        )
+
+        _ = try await service.fetchUsageMetrics(account: .defaultAccount)
+
+        XCTAssertEqual(service.subscriptionType, "Ultra")
     }
 
     /// Profiles are fetched concurrently, so the recorded error has to stay
