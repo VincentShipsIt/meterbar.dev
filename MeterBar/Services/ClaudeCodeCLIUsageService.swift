@@ -275,6 +275,15 @@ nonisolated enum ClaudeCodeCLIUsageParser {
             return nil
         }
 
+        // The CLI names the zone it printed the clock time in, e.g.
+        // "(Europe/Paris)". Read the time in that zone so the reset stays on
+        // the right instant even when it differs from the Mac's zone; an
+        // unknown or missing zone falls back to the region calendar's.
+        let zoneMatch = firstMatch(pattern: #"\(([^)]+)\)\s*$"#, in: rawReset)
+        let statedZone: TimeZone? = (zoneMatch?[safe: 1]).flatMap { identifier in
+            TimeZone(identifier: identifier.trimmingCharacters(in: .whitespaces))
+        }
+
         let cleaned = rawReset
             .replacingOccurrences(of: #"\s*\([^)]*\)\s*$"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -291,9 +300,11 @@ nonisolated enum ClaudeCodeCLIUsageParser {
         // `en_US_POSIX` Gregorian string sends the reset centuries away.
         // `TranscriptResetParser` pins a `Calendar(identifier: .gregorian)`
         // for the same reason; this follows that established pattern, only
-        // borrowing `regionCalendar`'s time zone.
+        // borrowing `regionCalendar`'s time zone when the CLI states none.
+        // The zone is an identifier, not a fixed offset, so a reset on the
+        // far side of a DST change gets that date's offset, not today's.
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = regionCalendar.timeZone
+        calendar.timeZone = statedZone ?? regionCalendar.timeZone
 
         let year = calendar.component(.year, from: now)
         let dateText = "\(year) \(cleaned)"

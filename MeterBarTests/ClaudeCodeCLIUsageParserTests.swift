@@ -209,4 +209,56 @@ final class ClaudeCodeCLIUsageParserTests: XCTestCase {
                 "Message should call out the cost-summary shape, got: \(message)")
         }
     }
+
+    // MARK: - Time zones and DST
+
+    private static func utcDate(_ iso: String) -> Date {
+        ISO8601DateFormatter().date(from: iso)!
+    }
+
+    /// The CLI prints the reset in the zone it names. A Mac in another zone
+    /// must not re-read "11am" as its own 11am.
+    func testResetHonorsTheZoneTheCLIStates() throws {
+        var regionCalendar = Calendar(identifier: .gregorian)
+        regionCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: "Current week (all models): 48% used · resets Nov 6 at 11am (Europe/Paris)",
+            now: Self.utcDate("2026-11-01T07:52:00Z"),
+            regionCalendar: regionCalendar)
+
+        // 11:00 CET is 10:00 UTC.
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, Self.utcDate("2026-11-06T10:00:00Z"))
+    }
+
+    /// EU clocks went back on 2026-10-25. A weekly reset read the day before,
+    /// still in summer time, falls after the change and must use winter time
+    /// (UTC+1), not the UTC+2 offset in force when it was read.
+    func testResetAfterEUFallBackUsesWinterOffset() throws {
+        var regionCalendar = Calendar(identifier: .gregorian)
+        regionCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Paris"))
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: """
+            Current session: 10% used · resets Oct 24 at 3pm (Europe/Paris)
+            Current week (all models): 30% used · resets Oct 30 at 11am (Europe/Paris)
+            """,
+            now: Self.utcDate("2026-10-24T09:00:00Z"),
+            regionCalendar: regionCalendar)
+
+        XCTAssertEqual(metrics.sessionLimit?.resetTime, Self.utcDate("2026-10-24T13:00:00Z"))
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, Self.utcDate("2026-10-30T10:00:00Z"))
+    }
+
+    func testUnknownZoneFallsBackToRegionZone() throws {
+        var regionCalendar = Calendar(identifier: .gregorian)
+        regionCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Paris"))
+
+        let metrics = try ClaudeCodeCLIUsageParser.parseMetrics(
+            from: "Current week (all models): 30% used · resets Nov 6 at 11am (Not/AZone)",
+            now: Self.utcDate("2026-11-01T07:52:00Z"),
+            regionCalendar: regionCalendar)
+
+        XCTAssertEqual(metrics.weeklyLimit?.resetTime, Self.utcDate("2026-11-06T10:00:00Z"))
+    }
 }

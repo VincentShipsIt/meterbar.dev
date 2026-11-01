@@ -296,11 +296,13 @@ struct RunwayContent: Equatable {
         ticks = Self.axisTicks(resetAt: reset, window: window, calendar: calendar, locale: locale)
     }
 
-    /// "Thu 9 AM" in the user's locale and calendar.
+    /// "Thu 9 AM" in the user's locale and calendar, in the calendar's zone so
+    /// the headline names the same wall clock as the axis ticks below it.
     private static func clock(_ date: Date, calendar: Calendar, locale: Locale) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = locale
+        formatter.timeZone = calendar.timeZone
         formatter.setLocalizedDateFormatFromTemplate("EEEj")
         return formatter.string(from: date)
     }
