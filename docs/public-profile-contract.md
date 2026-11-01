@@ -56,7 +56,7 @@ DELETE /api/profile/<slug>   Authorization: Bearer <publishKey>
     {
       "provider": "Claude Code",
       "name": "Claude Code",
-      "plan": "Max 20x",
+      "plan": "Ultra",
       "windows": [
         { "label": "Session", "usedPercent": 42, "resetsAt": "2026-09-29T23:00:00Z", "pace": "On pace" },
         { "label": "Weekly", "usedPercent": 17, "resetsAt": "2026-10-03T08:00:00Z", "pace": null }

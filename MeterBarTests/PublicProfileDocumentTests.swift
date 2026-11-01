@@ -197,14 +197,14 @@ final class PublicProfileDocumentTests: XCTestCase {
                 Self.snapshot(id: "d", title: "x", service: .openRouter),
             ],
             plans: [
-                .claudeCode: "Max 20x",
+                .claudeCode: "Ultra",
                 .codexCli: "me@example.com",
                 .xai: "/Users/me/.cursor",
                 .openRouter: String(repeating: "a", count: 40),
             ]
         )
 
-        XCTAssertEqual(doc.providers.map(\.plan), ["Max 20x", nil, nil, nil])
+        XCTAssertEqual(doc.providers.map(\.plan), ["Ultra", nil, nil, nil])
     }
 
     func testWindowLabelsThatAreNotPlainWordsAreDropped() {

@@ -13,7 +13,8 @@ struct ProviderSnapshot: Identifiable {
     let title: String
     let service: ServiceType
     let updatedAt: Date?
-    let limits: [SnapshotLimit]
+    /// A `var` so the plan pass can drop windows the plan does not have.
+    var limits: [SnapshotLimit]
     let emptyDetail: String
     let extraUsage: ExtraUsageStatus?
     let resetCreditsAvailable: Int?
@@ -26,7 +27,7 @@ struct ProviderSnapshot: Identifiable {
     /// a `var` only because a defaulted `let` is dropped from the memberwise
     /// initializer entirely, which would leave the builder unable to set it.
     var authNotice: ProviderAuthNotice?
-    /// Account type ("Max 20x", "Pro") when the provider reports one. A `var`
+    /// Account type ("Ultra", "Pro") when the provider reports one. A `var`
     /// for the same memberwise-initializer reason as `authNotice`.
     var planLabel: String?
 
@@ -778,6 +779,11 @@ enum ProviderSnapshotBuilder {
             guard ownsCredentials else { return card }
             var labelled = card
             labelled.planLabel = label
+            if PlanLabel.omitsSessionWindow(service: card.service, planLabel: label) {
+                // Ultra has no 5-hour cap: the weekly window is the only one
+                // that can block, so a session meter must not lead the card.
+                labelled.limits.removeAll { $0.kind == .session }
+            }
             return labelled
         }
     }

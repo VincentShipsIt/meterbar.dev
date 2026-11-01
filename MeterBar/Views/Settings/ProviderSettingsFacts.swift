@@ -83,11 +83,13 @@ struct ProviderSettingsFacts {
     var planText: String? {
         switch service {
         case .claudeCode:
-            let plan = subscriptionType?.capitalized
-            let tier = rateLimitTier?
-                .replacingOccurrences(of: "_", with: " ")
-                .capitalized
-            return [plan, tier].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+            // The renamed plan ("Ultra", "Max") already folds in the tier, so
+            // the raw `default_claude_max_20x` token would only contradict it.
+            return PlanLabel.make(
+                service: .claudeCode,
+                token: subscriptionType,
+                rateLimitTier: rateLimitTier
+            )
         case .codexCli:
             return subscriptionType?.capitalized.nilIfEmpty
         case .openRouter:

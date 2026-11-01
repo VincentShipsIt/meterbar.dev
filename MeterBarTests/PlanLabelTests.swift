@@ -3,10 +3,21 @@ import XCTest
 @testable import MeterBar
 
 final class PlanLabelTests: XCTestCase {
-    func testClaudeMaxCarriesTheTierMultiplier() {
+    func testClaudeTopTierIsNowUltra() {
+        // Nov 2026 rename: the old Max 20x is Ultra, the old Max 5x is Max.
         XCTAssertEqual(
             PlanLabel.make(service: .claudeCode, token: "max", rateLimitTier: "default_claude_max_20x"),
-            "Max 20x"
+            "Ultra"
+        )
+        XCTAssertEqual(
+            PlanLabel.make(service: .claudeCode, token: "max", rateLimitTier: "default_claude_max_5x"),
+            "Max"
+        )
+        XCTAssertEqual(PlanLabel.make(service: .claudeCode, token: "max"), "Max")
+        XCTAssertEqual(PlanLabel.make(service: .claudeCode, token: "ultra"), "Ultra")
+        XCTAssertEqual(
+            PlanLabel.make(service: .claudeCode, token: "ULTRA", rateLimitTier: "default_claude_max_20x"),
+            "Ultra"
         )
         XCTAssertEqual(
             PlanLabel.make(service: .claudeCode, token: "pro", rateLimitTier: "default_claude_ai"),
@@ -23,6 +34,39 @@ final class PlanLabelTests: XCTestCase {
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code High Usage"), "High")
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code Power Usage"), "Power")
         XCTAssertEqual(PlanLabel.make(service: .museCode, token: "Muse Code Maximum Usage"), "Maximum")
+    }
+
+    func testOnlyClaudeUltraDropsTheSessionWindow() {
+        XCTAssertTrue(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: "Ultra"))
+        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: "Max"))
+        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .claudeCode, planLabel: nil))
+        // Cursor also has an "Ultra" membership; its windows are untouched.
+        XCTAssertFalse(PlanLabel.omitsSessionWindow(service: .xai, planLabel: "Ultra"))
+    }
+
+    func testUltraCardShowsOnlyTheWeeklyWindow() {
+        let metrics = UsageMetrics(
+            service: .claudeCode,
+            sessionLimit: UsageLimit(used: 40, total: 100, resetTime: nil, windowSeconds: 5 * 3_600),
+            weeklyLimit: UsageLimit(used: 52, total: 100, resetTime: nil, windowSeconds: 7 * 86_400)
+        )
+        func card(plan: String) -> ProviderSnapshot? {
+            var input = ProviderSnapshotBuilder.Input(
+                metrics: [:],
+                claudeAccounts: [.defaultAccount],
+                claudeAccountMetrics: [ClaudeCodeAccount.defaultID: metrics],
+                enabledServices: [.claudeCode]
+            )
+            input.planLabels = [.claudeCode: plan]
+            return ProviderSnapshotBuilder.snapshots(input).first { $0.service == .claudeCode }
+        }
+
+        let ultra = card(plan: "Ultra")
+        XCTAssertEqual(ultra?.planLabel, "Ultra")
+        XCTAssertEqual(ultra?.limits.map(\.kind), [.weekly])
+        XCTAssertEqual(ultra?.primaryLimit?.kind, .weekly)
+
+        XCTAssertEqual(card(plan: "Max")?.limits.map(\.kind), [.session, .weekly])
     }
 
     func testEmptyTokenYieldsNoLabel() {
