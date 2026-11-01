@@ -312,6 +312,9 @@ struct MenuBarProviderDetailContent: View {
   /// the weekly strip drawn flat inside it. Each block is now its own card so
   /// the sections separate cleanly and no card nests inside another surface.
   enum DetailCard: Hashable {
+    /// Every window as a small tile ("Session · 81% left"), side by side, so
+    /// the hover opens with the same reading the popover tile gave.
+    case windowTiles
     /// The provider's failing and warning readiness checks, in full, with the
     /// way to fix each. The popover card only says "Action needed".
     case issues
@@ -336,10 +339,14 @@ struct MenuBarProviderDetailContent: View {
     hasProviderStatus: Bool = false,
     hasExtraUsage: Bool = false,
     showsQuotaReset: Bool = true,
+    showsWindowTiles: Bool = false,
     now: Date = Date()
   ) -> [DetailCard] {
     var cards: [DetailCard] = []
     if hasIssues { cards.append(.issues) }
+    if showsWindowTiles, !limits.isEmpty, !(hasExhaustedLimit && showsQuotaReset) {
+      cards.append(.windowTiles)
+    }
     if limits.isEmpty {
       // With issues listed, they already say why there is no data.
       if !hasIssues { cards.append(.empty) }
@@ -378,7 +385,8 @@ struct MenuBarProviderDetailContent: View {
       hasIssues: !snapshot.issues.isEmpty,
       hasProviderStatus: snapshot.service.hasStatusPage,
       hasExtraUsage: snapshot.displayedExtraUsage != nil,
-      showsQuotaReset: snapshot.showsQuotaReset
+      showsQuotaReset: snapshot.showsQuotaReset,
+      showsWindowTiles: true
     )
   }
 
@@ -390,12 +398,23 @@ struct MenuBarProviderDetailContent: View {
     let cards = orderedCards
     return VStack(alignment: .leading, spacing: MenuBarPopoverGeometry.cardGap) {
       ForEach(cards, id: \.self) { card in
-        HoverCardSurface(
-          revealed: isPresented,
-          reduceMotion: reduceMotion,
-          compact: card == .badges || card == .footer
-        ) {
-          content(for: card)
+        if card == .windowTiles {
+          // Each window is its own tile; wrapping them in a card would nest
+          // surfaces.
+          HoverWindowTiles(
+            limits: detailLimits,
+            accentColor: snapshot.accentColor,
+            revealed: isPresented,
+            reduceMotion: reduceMotion
+          )
+        } else {
+          HoverCardSurface(
+            revealed: isPresented,
+            reduceMotion: reduceMotion,
+            compact: card == .badges || card == .footer
+          ) {
+            content(for: card)
+          }
         }
       }
     }
@@ -416,16 +435,33 @@ struct MenuBarProviderDetailContent: View {
           )
         }
       }
+    case .windowTiles:
+      EmptyView()
     case .limit(let id, let isRunway, let showsLegend):
       if let limit = detailLimits.first(where: { $0.id == id }) {
         VStack(alignment: .leading, spacing: 10) {
-          LimitRow(
-            limit: limit,
-            accentColor: snapshot.accentColor,
-            density: .detail,
-            resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat,
-            showsReset: snapshot.showsQuotaReset
-          )
+          if isRunway {
+            // The window tiles above already state the figure; the chart
+            // card only needs to name its window.
+            HStack {
+              Text(limit.localizedTitle)
+                .font(.caption)
+                .fontWeight(.semibold)
+              Spacer(minLength: 6)
+              Text(LocalizedUsageFormat.percentLeft(limit.usageLimit))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+          } else {
+            LimitRow(
+              limit: limit,
+              accentColor: snapshot.accentColor,
+              density: .detail,
+              resetTimeFormat: menuBarDisplayPreferences.resetTimeFormat,
+              showsReset: snapshot.showsQuotaReset
+            )
+          }
           if isRunway {
             RunwayView(limit: limit, accentColor: snapshot.accentColor, showsFooter: false)
           }
@@ -461,6 +497,94 @@ struct MenuBarProviderDetailContent: View {
         )
       }
     }
+  }
+}
+
+/// The hover's opening row: every window as a small tile with its figure
+/// spelled out ("81% left") and when it resets or runs out.
+struct HoverWindowTiles: View {
+  let limits: [SnapshotLimit]
+  let accentColor: Color
+  let revealed: Bool
+  let reduceMotion: Bool
+
+  /// Three across fit the hover's width; more wrap onto another row.
+  static let columns = 3
+
+  static func rows(_ limits: [SnapshotLimit]) -> [[SnapshotLimit]] {
+    stride(from: 0, to: limits.count, by: columns).map { start in
+      Array(limits[start..<min(start + columns, limits.count)])
+    }
+  }
+
+  var body: some View {
+    let rows = Self.rows(limits)
+    VStack(spacing: MenuBarPopoverGeometry.cardGap) {
+      ForEach(0..<rows.count, id: \.self) { index in
+        HStack(alignment: .top, spacing: MenuBarPopoverGeometry.cardGap) {
+          ForEach(rows[index]) { limit in
+            HoverCardSurface(revealed: revealed, reduceMotion: reduceMotion) {
+              TimelineView(
+                .periodic(from: ResetCountdownSchedule.anchor, by: ResetCountdownSchedule.interval)
+              ) { timeline in
+                tile(limit, now: timeline.date)
+              }
+            }
+          }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  private func tile(_ limit: SnapshotLimit, now: Date) -> some View {
+    let tone = PopoverTileContent.tone(for: limit.usageLimit)
+    let line = Self.detailLine(for: limit, now: now)
+    return VStack(alignment: .leading, spacing: 3) {
+      Text(limit.localizedTitle)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+      Text(Self.figureText(for: limit))
+        .font(.system(size: 17, weight: .bold, design: .rounded))
+        .foregroundStyle(tone == .critical ? MeterBarTheme.danger : Color.primary)
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+      if let line {
+        Text(line.text)
+          .font(.caption2)
+          .foregroundStyle(line.isShortfall ? MeterBarTheme.danger : Color.secondary)
+          .lineLimit(2)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(limit.localizedAccessibilityLabel)
+    .accessibilityValue([Self.figureText(for: limit), line?.text].compactMap { $0 }.joined(separator: ". "))
+  }
+
+  /// "81% left" for a measured window; the amount left for credits.
+  static func figureText(for limit: SnapshotLimit) -> String {
+    switch limit.usageLimit.reading {
+    case .measured:
+      LocalizedUsageFormat.percentLeft(limit.usageLimit)
+    case .remainder, .allowance:
+      LocalizedUsageFormat.amountLeft(limit.usageLimit.formattedCreditRemainder)
+    case .unlimited:
+      "Unlimited"
+    }
+  }
+
+  /// "Out by Tue 9 AM", "Lasts until reset", or "Resets in 3h 10m".
+  static func detailLine(for limit: SnapshotLimit, now: Date) -> (text: String, isShortfall: Bool)? {
+    if let runway = RunwayContent(limit: limit.usageLimit, now: now) {
+      return (runway.headline, runway.outlook == .shortfall)
+    }
+    if let reset = limit.usageLimit.resetTime, reset > now {
+      return ("Resets in \(UsageDurationText.short(seconds: reset.timeIntervalSince(now)))", false)
+    }
+    return nil
   }
 }
 

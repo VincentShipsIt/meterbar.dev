@@ -46,6 +46,12 @@ struct ProviderSnapshot: Identifiable {
         issues.map(\.level).max(by: { $0.severity < $1.severity })
     }
 
+    /// Identity that survives an account rename. `id` embeds the display title,
+    /// so anything persisted per provider (a floating tile) keys on this instead.
+    var stableKey: String {
+        "\(service.rawValue)|\(accountID?.uuidString ?? "default")"
+    }
+
     var logoKind: ProviderLogoKind { .forService(service) }
     var accentColor: Color { MeterBarTheme.accent(for: service) }
 

@@ -12,8 +12,8 @@ import Foundation
 enum MenuBarPopoverGeometry {
     static let width: CGFloat = 390
     static let minimumHeight: CGFloat = 180
-    /// A 30pt control row with 6pt breathing room below.
-    static let chromeHeight: CGFloat = 36
+    /// The footer text line (freshness, refresh, dashboard) with 6pt below.
+    static let chromeHeight: CGFloat = 28
     /// Breathing room kept between the popover and each screen edge.
     static let screenPadding: CGFloat = 8
     /// Main provider stack ceiling. Hover details use the available screen height.
