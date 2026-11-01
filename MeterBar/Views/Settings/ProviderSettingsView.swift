@@ -441,7 +441,6 @@ struct ProviderSettingsView: View {
                             .fontWeight(.semibold)
                     }
                 }
-
             } else {
                 EmptyStateCard(
                     systemImage: "person.crop.circle.badge.exclamationmark",
