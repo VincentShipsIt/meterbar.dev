@@ -10,7 +10,12 @@ enum ClaudeCodeReconnectService {
     static let scriptRetention: TimeInterval = 24 * 60 * 60
 
     static func openReconnectTerminal(for account: ClaudeCodeAccount) throws {
-        let scriptURL = try writeReconnectScript(for: account)
+        try openInTerminal(writeReconnectScript(for: account))
+    }
+
+    /// Hands an already-staged script to Terminal. Shared with the add-account
+    /// flow so every sign-in script is launched the same way.
+    static func openInTerminal(_ scriptURL: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-a", "Terminal", scriptURL.path]
@@ -142,7 +147,7 @@ enum ClaudeCodeReconnectService {
         return scriptURL
     }
 
-    private static func shellQuoted(_ value: String) -> String {
+    static func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
@@ -155,7 +160,7 @@ enum ClaudeCodeReconnectError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .launchFailed(message):
-            "Could not open Terminal for Claude reconnect: \(message)"
+            "Could not open Terminal for sign-in: \(message)"
         }
     }
 }
