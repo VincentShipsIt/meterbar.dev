@@ -181,12 +181,16 @@ final class RunwayContentTests: XCTestCase {
     }
 
     /// The two tests below only prove the calendar's zone is honoured if the
-    /// process runs in a different one. GitHub's macOS runners use UTC, but if
-    /// that ever became Paris they would pass even with the zone handling
-    /// removed, so fail loudly instead. Never change the process zone from
-    /// inside a test: the suite runs concurrently. The CI `test` job re-runs
-    /// this class in a separate process with `TZ` set to a distant zone.
-    func testProcessZoneDiffersFromTheParisTestCalendar() {
+    /// process runs in a different one. This sentinel fails if it does not, but
+    /// only in the isolated CI invocation that sets `TZ=Pacific/Kiritimati`:
+    /// on a developer machine that happens to be in Paris it would fail a
+    /// full `swift test` for no real reason. Never change the process zone from
+    /// inside a test: the suite runs concurrently.
+    func testProcessZoneDiffersFromTheParisTestCalendar() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["TZ"] == "Pacific/Kiritimati",
+            "Runs only in the isolated TZ invocation"
+        )
         XCTAssertNotEqual(
             TimeZone.current.identifier,
             "Europe/Paris",
