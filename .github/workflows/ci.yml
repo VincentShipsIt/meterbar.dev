@@ -160,6 +160,15 @@ jobs:
         # (XCTSkip in APIIntegrationTests).
         run: bash scripts/check-coverage.sh
 
+      - name: Reset-clock tests in a distant process zone
+        # The calendar-zone tests only mean something when the process zone
+        # differs from the calendar's (Europe/Paris). Re-run them in their own
+        # process with TZ set far from both UTC and Paris, rather than
+        # changing the zone inside the concurrent shared test process.
+        env:
+          TZ: Pacific/Kiritimati
+        run: swift test --skip-build --filter RunwayContentTests
+
   lint:
     name: SwiftLint
     runs-on: macos-26

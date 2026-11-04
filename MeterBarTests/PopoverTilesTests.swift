@@ -285,6 +285,15 @@ final class PopoverTilesTests: XCTestCase {
         XCTAssertFalse(DesktopWidgetGuide.informativeText.contains("every provider"))
     }
 
+    func testDesktopWidgetGuideReloadsTimelinesBeforePresenting() {
+        var steps: [String] = []
+        DesktopWidgetGuide.present(
+            reloadTimelines: { steps.append("reload") },
+            showGuide: { steps.append("present") }
+        )
+        XCTAssertEqual(steps, ["reload", "present"])
+    }
+
     func testFooterFreshnessText() {
         XCTAssertEqual(PopoverFooterLine.freshnessText(updatedAt: nil, isRefreshing: false, now: now), "Not updated yet")
         XCTAssertEqual(PopoverFooterLine.freshnessText(updatedAt: now, isRefreshing: true, now: now), "Refreshing…")

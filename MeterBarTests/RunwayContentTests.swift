@@ -180,6 +180,24 @@ final class RunwayContentTests: XCTestCase {
         XCTAssertEqual(hoursIn[6], 157, accuracy: 0.001)
     }
 
+    /// The two tests below only prove the calendar's zone is honoured if the
+    /// process runs in a different one. GitHub's macOS runners use UTC, but if
+    /// that ever became Paris they would pass even with the zone handling
+    /// removed, so fail loudly instead. Never change the process zone from
+    /// inside a test: the suite runs concurrently. The CI `test` job re-runs
+    /// this class in a separate process with `TZ` set to a distant zone.
+    func testProcessZoneDiffersFromTheParisTestCalendar() {
+        XCTAssertNotEqual(
+            TimeZone.current.identifier,
+            "Europe/Paris",
+            "reset-clock tests would not detect a missing calendar-zone conversion"
+        )
+        XCTAssertNotEqual(
+            TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: 1_793_000_000)),
+            TimeZone(identifier: "Europe/Paris")?.secondsFromGMT(for: Date(timeIntervalSince1970: 1_793_000_000))
+        )
+    }
+
     /// The headline and detail name the reset in the calendar's zone, the same
     /// one the axis uses, whatever zone the process runs in.
     func testResetClockUsesTheCalendarZone() throws {

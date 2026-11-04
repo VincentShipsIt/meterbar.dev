@@ -49,10 +49,27 @@ let package = Package(
                 .defaultIsolation(MainActor.self)
             ]
         ),
+        // The widget extension's localized copy builder. It only needs
+        // MeterBarShared, so SwiftPM compiles that one file as a library for
+        // tests to call; the extension itself still builds from the Xcode
+        // project, which owns the rest of `MeterBarWidget`.
+        .target(
+            name: "MeterBarWidgetContent",
+            dependencies: [
+                .product(name: "MeterBarShared", package: "MeterBarShared")
+            ],
+            path: "MeterBarWidget",
+            sources: ["WidgetLocalization.swift"],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .defaultIsolation(MainActor.self)
+            ]
+        ),
         .testTarget(
             name: "MeterBarTests",
             dependencies: [
                 "MeterBar",
+                "MeterBarWidgetContent",
                 .product(name: "MeterBarShared", package: "MeterBarShared")
             ],
             path: "MeterBarTests",
