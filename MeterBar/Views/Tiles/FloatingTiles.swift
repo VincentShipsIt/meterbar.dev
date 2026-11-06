@@ -111,12 +111,6 @@ final class FloatingTileController {
         self.registry = registry
     }
 
-    var floatingIDs: [String] { registry.ids }
-
-    func isFloating(_ id: String) -> Bool {
-        panels[id] != nil
-    }
-
     func float(snapshotID: String) {
         if let panel = panels[snapshotID] {
             panel.orderFrontRegardless()

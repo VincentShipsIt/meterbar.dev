@@ -745,6 +745,12 @@ final class ICloudUsageAggregationTests: XCTestCase {
         XCTAssertEqual(window.totalCostUSD, 3, accuracy: 0.000_001, "the 1st must not read $0.00")
     }
 
+    func testDeviceSchemaContainsOnlyReviewedFields() {
+        let payload = ICloudUsageRecordSchema.fields(for: device(firstDeviceID, name: "Studio"))
+
+        XCTAssertEqual(Set(payload.keys), ICloudUsageRecordSchema.deviceFieldNames)
+    }
+
     func testSchemaContainsOnlyReviewedAggregateFields() throws {
         let source = rollup(firstDeviceID, input: 42, cost: 1.5)
         let payload = try ICloudUsageRecordSchema.fields(for: source)

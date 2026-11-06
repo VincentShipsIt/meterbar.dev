@@ -150,13 +150,6 @@ final class StatusItemPresenter {
         )
     }
 
-    /// Which accounts own an item right now, so the delegate can build the
-    /// switcher submenu for the item the user right-clicked.
-    @MainActor
-    func accountEntry(for itemID: String) -> MenuBarAccountItemEntry? {
-        accountItemPlan?.entries.first { $0.id == itemID }
-    }
-
     /// The account the switcher item actually shows, which is not always the
     /// persisted preference: the planner falls back to the first enabled account
     /// when the stored key names a removed or untracked one. Checking the raw

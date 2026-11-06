@@ -59,5 +59,4 @@ final class AuthenticationManager: ObservableObject {
     }
 
     var isClaudeAuthenticated: Bool { claudeAdminKey != nil }
-    var isOpenAIAuthenticated: Bool { openaiAdminKey != nil }
 }

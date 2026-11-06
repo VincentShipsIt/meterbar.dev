@@ -451,15 +451,6 @@ struct MeterBarCompanionSurface: View {
   }
 }
 
-extension NSPanel {
-  func applyCompanionClipping(radius: CGFloat = MeterBarTheme.companionShellRadius) {
-    contentView?.wantsLayer = true
-    contentView?.layer?.cornerRadius = radius
-    contentView?.layer?.cornerCurve = .continuous
-    contentView?.layer?.masksToBounds = true
-  }
-}
-
 /// Which fill a `DashboardTile` draws. The menu-bar popover has no shell behind
 /// its cards, so each one is its own glass surface; everywhere else a tile is a
 /// neutral wash over the chrome it sits on.

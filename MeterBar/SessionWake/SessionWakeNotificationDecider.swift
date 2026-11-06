@@ -40,12 +40,6 @@ enum SessionWakeNotificationDecider {
             && context.notifyOnCompletion
     }
 
-    /// Whether a "watch started" notification may post. Same gate; watch-start
-    /// notifications are informational and never bypass the global/provider gate.
-    static func shouldNotifyOnWatchStart(_ context: SessionWakeNotificationContext) -> Bool {
-        shouldNotifyOnCompletion(context)
-    }
-
     /// The completion notification for a finished run, or `nil` when any gate is
     /// closed. Copy is pluralized and surfaces failure and still-queued counts so
     /// the banner reads honestly whether the run fully drained the queue or the

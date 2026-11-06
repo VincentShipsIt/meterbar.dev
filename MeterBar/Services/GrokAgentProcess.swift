@@ -269,15 +269,6 @@ nonisolated final class GrokAgentProcess: @unchecked Sendable {
         }
     }
 
-    /// Closes stdin, which is how a well-behaved ACP agent is told to shut down.
-    func closeInput() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !stdinClosed else { return }
-        stdinClosed = true
-        close(stdinFD)
-    }
-
     // MARK: - Termination
 
     /// Stops the agent and everything it spawned. Idempotent, and safe to call

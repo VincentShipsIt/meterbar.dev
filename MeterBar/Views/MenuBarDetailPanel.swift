@@ -131,15 +131,6 @@ final class MeterBarMenuDetailPanel {
     return window === panel
   }
 
-  /// Updates hover ownership for the popover card that opened the detail. The
-  /// dismissal callback clears the SwiftUI selection only when the deferred
-  /// close actually wins; entering the detail panel cancels it.
-  func setSourceHovered(_ isHovered: Bool, onDismiss: @escaping () -> Void) {
-    sourceIsHovered = isHovered
-    hoverDismissAction = onDismiss
-    reconcileHoverDismissal()
-  }
-
   private func setDetailHovered(_ isHovered: Bool) {
     detailIsHovered = isHovered
     reconcileHoverDismissal()

@@ -83,19 +83,6 @@ nonisolated enum CostWindowSelection: Int, CaseIterable, Identifiable {
         }
     }
 
-    func costWindow(
-        from summary: CostSummary,
-        now: Date = Date(),
-        calendar: Calendar = .current
-    ) -> DailyCostWindow {
-        switch self {
-        case .week, .month:
-            return summary.dailyCostWindow(lastDays: rawValue, now: now, calendar: calendar)
-        case .monthToDate:
-            return summary.monthToDateCostWindow(now: now, calendar: calendar)
-        }
-    }
-
     private static func monthStart(now: Date, calendar: Calendar) -> Date {
         calendar.date(from: calendar.dateComponents([.year, .month], from: now))
             ?? calendar.startOfDay(for: now)
