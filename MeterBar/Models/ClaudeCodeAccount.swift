@@ -239,22 +239,10 @@ final class ClaudeCodeAccountStore: ObservableObject, CredentialLocationStoring 
     }
 
     func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
-        var ordered = accounts
-        guard !ordered.isEmpty else { return }
-
-        let movingIndexes = source.sorted()
-        guard movingIndexes.allSatisfy({ ordered.indices.contains($0) }) else { return }
-
-        let movingAccounts = movingIndexes.map { ordered[$0] }
-        for index in movingIndexes.reversed() {
-            ordered.remove(at: index)
+        guard let order = AccountOrder.moving(accounts.map(\.id), fromOffsets: source, toOffset: destination) else {
+            return
         }
-
-        let removedBeforeDestination = movingIndexes.filter { $0 < destination }.count
-        let adjustedDestination = max(0, min(destination - removedBeforeDestination, ordered.count))
-        ordered.insert(contentsOf: movingAccounts, at: adjustedDestination)
-
-        accountOrder = ordered.map(\.id)
+        accountOrder = order
         saveAccountOrder()
     }
 

@@ -661,15 +661,7 @@ struct WidgetSettingsBurnDownPreviewSurface: View {
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.stackSpacing) {
             if let emptyState = presentation.emptyState, let emptyStateText {
-                Spacer()
-                Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
-                Text(emptyStateText.title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text(emptyStateText.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
+                WidgetSettingsPreviewParts.emptyState(emptyState, text: emptyStateText)
             } else if family == .small {
                 if let row = presentation.rows.first {
                     WidgetSettingsBurnDownPreviewRow(row: row, family: family)
@@ -688,33 +680,13 @@ struct WidgetSettingsBurnDownPreviewSurface: View {
                 overflow
             }
         }
-        .padding(metrics.contentPadding)
-        .frame(
-            width: family.previewSize.width,
-            height: family.previewSize.height,
-            alignment: .topLeading
-        )
-        .background(appearance.background)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.primary.opacity(0.10), lineWidth: 1)
-        }
-        .environment(\.colorScheme, appearance.colorScheme)
-        .saturation(appearance == .grayscale ? 0 : 1)
+        .widgetSettingsPreviewChrome(family: family, metrics: metrics, appearance: appearance)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(family.settingsTitle) burn down widget preview")
     }
 
-    @ViewBuilder private var overflow: some View {
-        if presentation.hiddenRowCount > 0 {
-            Label(
-                "+\(presentation.hiddenRowCount) more",
-                systemImage: "ellipsis.circle"
-            )
-            .font(.system(size: metrics.captionSize))
-            .foregroundStyle(.secondary)
-        }
+    private var overflow: some View {
+        WidgetSettingsPreviewParts.overflow(hiddenRowCount: presentation.hiddenRowCount, metrics: metrics)
     }
 }
 
@@ -811,6 +783,64 @@ struct WidgetSettingsPreviewEmptyStateText: Equatable {
     }
 }
 
+/// The pieces both widget previews draw identically, so the usage and burn-down
+/// previews cannot drift apart.
+enum WidgetSettingsPreviewParts {
+    /// The placeholder the widget shows for `state`, in the reader's language.
+    @ViewBuilder
+    static func emptyState(
+        _ state: WidgetPresentationEmptyState,
+        text: WidgetSettingsPreviewEmptyStateText
+    ) -> some View {
+        Spacer()
+        Image(systemName: state == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
+        Text(text.title)
+            .font(.caption)
+            .fontWeight(.semibold)
+        Text(text.detail)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        Spacer()
+    }
+
+    /// "+N more" when the family hides rows.
+    @ViewBuilder
+    static func overflow(hiddenRowCount: Int, metrics: WidgetGlanceMetrics) -> some View {
+        if hiddenRowCount > 0 {
+            Label(
+                "+\(hiddenRowCount) more",
+                systemImage: "ellipsis.circle"
+            )
+            .font(.system(size: metrics.captionSize))
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+extension View {
+    /// The widget-shaped frame, plate and appearance both previews sit in.
+    func widgetSettingsPreviewChrome(
+        family: WidgetPresentationFamily,
+        metrics: WidgetGlanceMetrics,
+        appearance: WidgetSettingsPreviewAppearance
+    ) -> some View {
+        padding(metrics.contentPadding)
+            .frame(
+                width: family.previewSize.width,
+                height: family.previewSize.height,
+                alignment: .topLeading
+            )
+            .background(appearance.background)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.primary.opacity(0.10), lineWidth: 1)
+            }
+            .environment(\.colorScheme, appearance.colorScheme)
+            .saturation(appearance == .grayscale ? 0 : 1)
+    }
+}
+
 /// A scale drawing of the widget, not a second design of it.
 ///
 /// This preview used to be a third hand-rolled copy of the widget row, drawn at
@@ -838,15 +868,7 @@ struct WidgetSettingsPreviewSurface: View {
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.stackSpacing) {
             if let emptyState = presentation.emptyState, let emptyStateText {
-                Spacer()
-                Image(systemName: emptyState == .noSelection ? "slider.horizontal.3" : "exclamationmark.triangle")
-                Text(emptyStateText.title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text(emptyStateText.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
+                WidgetSettingsPreviewParts.emptyState(emptyState, text: emptyStateText)
             } else {
                 switch layout {
                 case let .hero(headline, supporting):
@@ -859,31 +881,11 @@ struct WidgetSettingsPreviewSurface: View {
                         WidgetSettingsPreviewRow(row: row, family: family)
                     }
                 }
-                if presentation.hiddenRowCount > 0 {
-                    Label(
-                        "+\(presentation.hiddenRowCount) more",
-                        systemImage: "ellipsis.circle"
-                    )
-                    .font(.system(size: metrics.captionSize))
-                    .foregroundStyle(.secondary)
-                }
+                WidgetSettingsPreviewParts.overflow(hiddenRowCount: presentation.hiddenRowCount, metrics: metrics)
                 Spacer(minLength: 0)
             }
         }
-        .padding(metrics.contentPadding)
-        .frame(
-            width: family.previewSize.width,
-            height: family.previewSize.height,
-            alignment: .topLeading
-        )
-        .background(appearance.background)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.primary.opacity(0.10), lineWidth: 1)
-        }
-        .environment(\.colorScheme, appearance.colorScheme)
-        .saturation(appearance == .grayscale ? 0 : 1)
+        .widgetSettingsPreviewChrome(family: family, metrics: metrics, appearance: appearance)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(family.settingsTitle) widget preview")
     }

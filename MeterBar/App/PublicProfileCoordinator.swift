@@ -10,22 +10,7 @@ import MeterBarShared
 enum PublicProfileSource {
     static func currentDocument(now: Date = Date()) -> PublicProfileDocument {
         let visibility = ProviderVisibilityStore.shared
-        let snapshots = ProviderSnapshotBuilder.snapshots(.live(
-            stores: .init(
-                dataManager: .shared,
-                claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
-                codexAccounts: CodexAccountStore.shared.accounts,
-                grokAccounts: GrokAccountStore.shared.accounts,
-                openRouterAccounts: OpenRouterAccountStore.shared.accounts,
-                enabledServices: visibility.enabledServices,
-                claudeCodeService: .shared,
-                codexCliService: .shared,
-                cursorService: .shared,
-                openRouterService: .shared,
-                grokService: .shared
-            ),
-            parseHealth: ProviderParseHealthStore.shared.records
-        ))
+        let snapshots = ProviderSnapshotBuilder.liveSnapshots()
         var plans: [ServiceType: String] = [:]
         for service in ServiceType.allCases {
             if let plan = ProviderSettingsFacts.live(for: service, snapshots: []).subscriptionType {

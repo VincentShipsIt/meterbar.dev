@@ -255,7 +255,6 @@ typealias CodexAccountProfileSave = ProviderAccountProfileSave
 typealias CodexAccountProfileDraft = ProviderAccountProfileDraft
 typealias CodexAccountAuthenticationState = ProviderAccountConnectionState
 typealias ClaudeAccountRowAction = ProviderAccountAuthAction
-typealias ClaudeAccountRowActionRoute = ProviderAccountAuthActionRoute
 
 enum ClaudeReconnectConfirmation {
     static let confirmButtonTitle = ProviderAccountReconnectConfirmation.confirmButtonTitle

@@ -61,9 +61,6 @@ public struct UsageMetrics: Codable, Identifiable, Sendable {
     public let lastUpdated: Date
     private let invalidQuotaWindows: Set<QuotaWindowID>
 
-    public var hasInvalidQuota: Bool {
-        !invalidQuotaWindows.isEmpty || additionalQuotaReadings.contains(.unavailable(.parseDrift))
-    }
     public var hasInvalidBlockingQuota: Bool {
         invalidQuotaWindows.contains(.session) || invalidQuotaWindows.contains(.weekly)
     }

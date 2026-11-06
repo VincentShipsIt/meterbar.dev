@@ -31,23 +31,8 @@ struct LiveProviderSnapshotsReader<Content: View>: View {
     }
 
     private var snapshots: [ProviderSnapshot] {
-        ProviderSnapshotBuilder.snapshots(
-            .live(
-                stores: .init(
-                    dataManager: dataManager,
-                    claudeAccounts: claudeAccountStore.accounts,
-                    codexAccounts: codexAccountStore.accounts,
-                    grokAccounts: grokAccountStore.accounts,
-                    openRouterAccounts: openRouterAccountStore.accounts,
-                    enabledServices: providerVisibility.enabledServices,
-                    claudeCodeService: claudeCodeService,
-                    codexCliService: codexCliService,
-                    cursorService: cursorService,
-                    openRouterService: openRouterService,
-                    grokService: grokService
-                ),
-                parseHealth: parseHealthStore.records
-            ))
+        // Reads the shared stores this view observes through its @StateObjects.
+        ProviderSnapshotBuilder.liveSnapshots()
     }
 }
 
@@ -109,12 +94,6 @@ final class FloatingTileController {
 
     init(registry: FloatingTileRegistry = FloatingTileRegistry()) {
         self.registry = registry
-    }
-
-    var floatingIDs: [String] { registry.ids }
-
-    func isFloating(_ id: String) -> Bool {
-        panels[id] != nil
     }
 
     func float(snapshotID: String) {
@@ -259,8 +238,22 @@ enum DesktopWidgetGuide {
         The small size shows your tightest limit; the medium size shows the tightest providers that fit.
         """
 
-    static func present() {
+    /// Reloads the timelines first so the gallery shows current numbers, then
+    /// shows the guide. The two steps are injectable so a test can pin that
+    /// order without touching WidgetKit or opening a modal alert.
+    static func present(
+        reloadTimelines: () -> Void = reloadWidgetTimelines,
+        showGuide: () -> Void = showAlert
+    ) {
+        reloadTimelines()
+        showGuide()
+    }
+
+    static func reloadWidgetTimelines() {
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    static func showAlert() {
         NSApp.activate()
         let alert = NSAlert()
         alert.messageText = messageText

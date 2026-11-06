@@ -639,9 +639,6 @@ nonisolated struct GrokBillingConfig: Decodable, Sendable {
         billingPeriodEnd = GrokDecoding.string(container, ["billingPeriodEnd"])
     }
 
-    var billingPeriodStartDate: Date? { billingPeriodStart.flatMap(FlexibleISO8601.date(from:)) }
-    var billingPeriodEndDate: Date? { billingPeriodEnd.flatMap(FlexibleISO8601.date(from:)) }
-
     /// The share of the cycle allowance already spent, for accounts that report
     /// the credits pair instead of a percent. Tried before the omitted-default
     /// zero, since falling through to `0` here would under-report real usage.

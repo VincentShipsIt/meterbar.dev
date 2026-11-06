@@ -53,16 +53,6 @@ public enum QuotaBand: Equatable, Sendable {
         }
     }
 
-    /// Headline for the overview status hero (popover and dashboard).
-    public var overviewTitle: String {
-        switch self {
-        case .healthy: return "All tracked quotas look healthy"
-        case .tight: return "Quota is tight"
-        case .critical: return "Quota needs attention"
-        case .exhausted: return "Quota exhausted"
-        }
-    }
-
     /// Status icon. The red bands get the strong octagon, the amber band the
     /// triangle, so icon severity always agrees with color and copy.
     public var iconName: String {

@@ -585,6 +585,31 @@ enum ProviderSnapshotBuilder {
         }
     }
 
+    /// The cards every live surface draws, read from the app's shared stores.
+    ///
+    /// A SwiftUI caller must still observe those stores (as `@StateObject`) so
+    /// it redraws when one of them changes; this only reads them.
+    @MainActor
+    static func liveSnapshots(now: Date = Date()) -> [ProviderSnapshot] {
+        snapshots(.live(
+            stores: .init(
+                dataManager: .shared,
+                claudeAccounts: ClaudeCodeAccountStore.shared.accounts,
+                codexAccounts: CodexAccountStore.shared.accounts,
+                grokAccounts: GrokAccountStore.shared.accounts,
+                openRouterAccounts: OpenRouterAccountStore.shared.accounts,
+                enabledServices: ProviderVisibilityStore.shared.enabledServices,
+                claudeCodeService: .shared,
+                codexCliService: .shared,
+                cursorService: .shared,
+                openRouterService: .shared,
+                grokService: .shared
+            ),
+            parseHealth: ProviderParseHealthStore.shared.records,
+            now: now
+        ))
+    }
+
     /// Builds the provider cards. Emission order follows each store; the
     /// returned array is then sorted for display: same subscription stays
     /// together, groups sit at their earliest label, labels inside a group

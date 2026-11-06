@@ -50,23 +50,3 @@ public struct WidgetFamilyRowBudget: Equatable, Sendable {
         )
     }
 }
-
-/// Compatibility surface for existing callers. New widget planning uses
-/// `WidgetFamilyRowBudget` for all three supported families.
-public enum MediumWidgetRowBudget {
-    public static let maximumSlots = WidgetPresentationFamily.medium.maximumSlots
-
-    public static func visibleRowCount(totalRowCount: Int) -> Int {
-        WidgetFamilyRowBudget.plan(
-            totalRowCount: totalRowCount,
-            family: .medium
-        ).visibleRowCount
-    }
-
-    public static func hiddenRowCount(totalRowCount: Int) -> Int {
-        WidgetFamilyRowBudget.plan(
-            totalRowCount: totalRowCount,
-            family: .medium
-        ).hiddenRowCount
-    }
-}

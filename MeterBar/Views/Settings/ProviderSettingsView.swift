@@ -150,24 +150,8 @@ struct ProviderSettingsView: View {
     private var oauthFallbackEnabled = true
 
     private var providerSnapshots: [ProviderSnapshot] {
-        ProviderSnapshotBuilder.snapshots(
-            .live(
-                stores: .init(
-                    dataManager: dataManager,
-                    claudeAccounts: claudeAccountStore.accounts,
-                    codexAccounts: codexAccountStore.accounts,
-                    grokAccounts: grokAccountStore.accounts,
-                    openRouterAccounts: openRouterAccountStore.accounts,
-                    enabledServices: providerVisibility.enabledServices,
-                    claudeCodeService: claudeCodeService,
-                    codexCliService: codexCliService,
-                    cursorService: cursorService,
-                    openRouterService: openRouterService,
-                    grokService: grokService
-                ),
-                parseHealth: parseHealthStore.records
-            )
-        )
+        // Reads the shared stores this view observes through its @StateObjects.
+        ProviderSnapshotBuilder.liveSnapshots()
     }
 
     private var claudeExtraUsageStatus: ExtraUsageStatus? {

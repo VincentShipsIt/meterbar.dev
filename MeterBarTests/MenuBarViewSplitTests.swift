@@ -167,21 +167,6 @@ final class MenuBarPopoverGeometryTests: XCTestCase {
 }
 
 @MainActor
-final class ProviderStatusDotsSummaryTests: XCTestCase {
-    func testNoIssuesReadsAsFullyOperational() {
-        XCTAssertEqual(ProviderStatusDotsSummary.text(issueCount: 0), "All provider pages operational")
-    }
-
-    func testSingleIssueUsesSingularCopy() {
-        XCTAssertEqual(ProviderStatusDotsSummary.text(issueCount: 1), "1 provider needs attention")
-    }
-
-    func testMultipleIssuesUsePluralCopy() {
-        XCTAssertEqual(ProviderStatusDotsSummary.text(issueCount: 3), "3 providers need attention")
-    }
-}
-
-@MainActor
 final class ProviderCardPresentationTests: XCTestCase {
     private func snapshot(
         updatedAt: Date? = Date(),

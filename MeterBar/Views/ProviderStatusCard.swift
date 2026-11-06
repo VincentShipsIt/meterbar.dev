@@ -48,12 +48,6 @@ struct ProviderStatusCard: View {
         self.onSelect = onSelect
     }
 
-    /// The identity row this card shows, exposed so the hover detail panel's
-    /// header can be asserted equal to it.
-    var headerContent: ProviderCardHeader.Content {
-        ProviderCardHeader.Content(snapshot: snapshot)
-    }
-
     private var isLiveAccount: Bool {
         ProviderCardPresentation.showsLiveAccount(for: snapshot, failoverSettings: failoverSettings)
     }

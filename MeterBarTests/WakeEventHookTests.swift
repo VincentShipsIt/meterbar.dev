@@ -31,30 +31,18 @@ final class WakeEventHookTests: XCTestCase {
         )
     }
 
-    func testHooksDefaultOffAndRequireAConfiguredCommand() {
-        let store = SessionWakeSettingsStore(userDefaults: defaults)
+    func testSessionWakeReadsTheHookConfigurationQuotaEventSettingsMirrors() {
+        XCTAssertEqual(SessionWakeSettingsStore(userDefaults: defaults).eventHookConfiguration, .disabled)
 
-        XCTAssertEqual(store.eventHookConfiguration, .disabled)
-        store.setHookEnabled(true, for: .quotaExhausted)
-        XCTAssertFalse(store.eventHookConfiguration.enabledEvents.contains(.quotaExhausted))
-
-        store.setHookExecutablePath("/usr/bin/true")
-        store.setHookEnabled(true, for: .quotaExhausted)
-        XCTAssertTrue(store.eventHookConfiguration.enabledEvents.contains(.quotaExhausted))
-
-        store.setHookExecutablePath("")
-        XCTAssertTrue(store.eventHookConfiguration.enabledEvents.isEmpty)
-    }
-
-    func testCommandArgumentsAndEventOptInsPersistExactly() {
-        let store = SessionWakeSettingsStore(userDefaults: defaults)
-        store.setHookExecutablePath("/usr/bin/printf")
-        store.addHookArgument()
-        store.setHookArgument("value with spaces", at: 0)
-        store.addHookArgument()
-        store.setHookArgument("$(not-expanded)", at: 1)
-        store.setHookEnabled(true, for: .quotaReset)
-        store.setHookEnabled(true, for: .wakeComplete)
+        let integrations = QuotaEventSettingsStore(userDefaults: defaults)
+        integrations.setLocalExecutablePath("/usr/bin/printf")
+        integrations.addLocalArgument()
+        integrations.setLocalArgument("value with spaces", at: 0)
+        integrations.addLocalArgument()
+        integrations.setLocalArgument("$(not-expanded)", at: 1)
+        integrations.setLocalDeliveryEnabled(true)
+        integrations.setWakeEventEnabled(true, for: .quotaReset)
+        integrations.setWakeEventEnabled(true, for: .wakeComplete)
 
         let reloaded = SessionWakeSettingsStore(userDefaults: defaults)
 

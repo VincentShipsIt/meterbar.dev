@@ -26,6 +26,8 @@ final class SessionWakeSettingsStore: ObservableObject {
     @Published var notifyOnCompletion: Bool
     @Published private(set) var maxSessionsPerRun: Int
     @Published private(set) var maxTurns: Int
+    /// Read-only view of the legacy hook key. `QuotaEventSettingsStore` owns
+    /// every edit and mirrors the hook part back into that key.
     @Published private(set) var eventHookConfiguration: WakeEventHookConfiguration
 
     private let userDefaults: UserDefaults
@@ -225,45 +227,6 @@ final class SessionWakeSettingsStore: ObservableObject {
         userDefaults.set(clamped, forKey: StorageKeys.sessionWakeMaxTurns)
     }
 
-    // MARK: - Event hooks
-
-    func setHookExecutablePath(_ path: String) {
-        guard path != eventHookConfiguration.executablePath else { return }
-        eventHookConfiguration.executablePath = path
-        if !eventHookConfiguration.isConfigured {
-            eventHookConfiguration.enabledEvents.removeAll()
-        }
-        persistEventHooks()
-    }
-
-    func addHookArgument() {
-        eventHookConfiguration.arguments.append("")
-        persistEventHooks()
-    }
-
-    func setHookArgument(_ value: String, at index: Int) {
-        guard eventHookConfiguration.arguments.indices.contains(index),
-              eventHookConfiguration.arguments[index] != value else { return }
-        eventHookConfiguration.arguments[index] = value
-        persistEventHooks()
-    }
-
-    func removeHookArgument(at index: Int) {
-        guard eventHookConfiguration.arguments.indices.contains(index) else { return }
-        eventHookConfiguration.arguments.remove(at: index)
-        persistEventHooks()
-    }
-
-    func setHookEnabled(_ enabled: Bool, for event: WakeEventHookEvent) {
-        if enabled {
-            guard eventHookConfiguration.isConfigured else { return }
-            eventHookConfiguration.enabledEvents.insert(event)
-        } else {
-            eventHookConfiguration.enabledEvents.remove(event)
-        }
-        persistEventHooks()
-    }
-
     /// Reconcile with the currently available Claude accounts. If the selected
     /// Claude wake account disappeared, clear it and turn off — automation must
     /// never silently retarget another account.
@@ -328,11 +291,6 @@ final class SessionWakeSettingsStore: ObservableObject {
     private func syncSharedFeatureFlag() {
         UserDefaults(suiteName: SharedMetricsStore.appGroupIdentifier)?
             .set(featureEnabled, forKey: SessionWakeCLI.sharedFeatureEnabledKey)
-    }
-
-    private func persistEventHooks() {
-        guard let data = try? JSONEncoder().encode(eventHookConfiguration) else { return }
-        userDefaults.set(data, forKey: StorageKeys.sessionWakeEventHooks)
     }
 
     /// Synchronous kill-switch propagation. The controller writes the complete

@@ -221,8 +221,6 @@ nonisolated enum StorageKeys {
     /// `DisplayCurrencySource` raw value. Missing or unrecognized (a retired
     /// case from an older build) migrates to `.manual`.
     static let displayCurrencySource = "DisplayCurrencySource"
-    /// Legacy automatic-mode flag retained for migration from 1.8.35.
-    static let displayCurrencyAutomatic = "DisplayCurrencyAutomatic"
     /// Last successful automatic refresh, used to cap fetches at once per day.
     static let displayCurrencyLastRefreshAt = "DisplayCurrencyLastRefreshAt"
 
