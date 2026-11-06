@@ -136,37 +136,12 @@ nonisolated enum ManagedProcess {
         posix_spawn_file_actions_addclose(&fileActions, errPipe[0])
         posix_spawn_file_actions_addchdir(&fileActions, workingDirectory)
 
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        // Reset the child's signal state to a clean default. We spawn from a
-        // libdispatch worker thread, whose signal mask may block signals such as
-        // SIGTERM; without this the child would inherit that blocked mask and be
-        // unable to receive the graceful SIGTERM we send on timeout (only the
-        // unblockable SIGKILL would get through). Empty the mask and restore
-        // every disposition to SIG_DFL so the child behaves like a normal process.
-        var emptyMask = sigset_t()
-        sigemptyset(&emptyMask)
-        posix_spawnattr_setsigmask(&attributes, &emptyMask)
-        var defaultSignals = sigset_t()
-        sigfillset(&defaultSignals)
-        posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
-        // New process group with the child as leader ⇒ kill(-pgid) hits the tree.
-        posix_spawnattr_setpgroup(&attributes, 0)
-        posix_spawnattr_setflags(
-            &attributes,
-            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF)
+        let (pid, spawnResult) = ProcessGroupSpawn.spawn(
+            executable: executable,
+            arguments: arguments,
+            environment: environment,
+            fileActions: &fileActions
         )
-
-        let argv = ([executable] + arguments).map { strdup($0) } + [nil]
-        let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer {
-            argv.forEach { free($0) }
-            envp.forEach { free($0) }
-        }
-
-        var pid: pid_t = 0
-        let spawnResult = posix_spawn(&pid, executable, &fileActions, &attributes, argv, envp)
         // Parent closes the write ends so read EOFs when the child exits.
         close(outPipe[1]); close(errPipe[1])
         guard spawnResult == 0 else {

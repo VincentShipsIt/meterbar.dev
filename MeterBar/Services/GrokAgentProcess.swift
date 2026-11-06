@@ -189,34 +189,12 @@ nonisolated final class GrokAgentProcess: @unchecked Sendable {
         posix_spawn_file_actions_addclose(&fileActions, errPipe[0])
         posix_spawn_file_actions_addchdir(&fileActions, workingDirectory)
 
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        // Spawned from a libdispatch worker whose signal mask may block SIGTERM;
-        // clear it (and restore default dispositions) so the graceful stop can
-        // actually reach the child instead of only the unblockable SIGKILL.
-        var emptyMask = sigset_t()
-        sigemptyset(&emptyMask)
-        posix_spawnattr_setsigmask(&attributes, &emptyMask)
-        var defaultSignals = sigset_t()
-        sigfillset(&defaultSignals)
-        posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
-        // New process group with the child as leader ⇒ kill(-pgid) hits the tree.
-        posix_spawnattr_setpgroup(&attributes, 0)
-        posix_spawnattr_setflags(
-            &attributes,
-            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF)
+        let (spawnedPID, spawnResult) = ProcessGroupSpawn.spawn(
+            executable: executable,
+            arguments: arguments,
+            environment: environment,
+            fileActions: &fileActions
         )
-
-        let argv = ([executable] + arguments).map { strdup($0) } + [nil]
-        let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer {
-            argv.forEach { free($0) }
-            envp.forEach { free($0) }
-        }
-
-        var spawnedPID: pid_t = 0
-        let spawnResult = posix_spawn(&spawnedPID, executable, &fileActions, &attributes, argv, envp)
         // The parent keeps only the ends it uses; closing the rest makes EOF real.
         close(inPipe[0]); close(outPipe[1]); close(errPipe[1])
         guard spawnResult == 0 else {
