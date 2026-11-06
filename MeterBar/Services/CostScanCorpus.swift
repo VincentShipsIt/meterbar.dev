@@ -130,7 +130,7 @@ nonisolated enum CostScanCorpus {
         // A subtree the walk cannot descend into still holds transcripts. The
         // handler keeps the walk going — the rest of the corpus is worth
         // scanning — but the listing can no longer claim to be the whole truth.
-        let walk = WalkStatus()
+        let walk = CostScanWalkStatus()
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
@@ -182,23 +182,24 @@ nonisolated enum CostScanCorpus {
             isComplete: walk.isComplete
         )
     }
+}
 
-    /// The enumerator's error handler outlives this call's stack frame, so the
-    /// flag it sets cannot be a captured local.
-    private final class WalkStatus: @unchecked Sendable {
-        private let lock = NSLock()
-        private var incomplete = false
+/// Whether a directory walk saw every entry. The enumerator's error handler
+/// outlives the caller's stack frame, so the flag it sets cannot be a captured
+/// local. Shared by the corpus scan and the freshness probe.
+nonisolated final class CostScanWalkStatus: @unchecked Sendable {
+    private let lock = NSLock()
+    private var incomplete = false
 
-        var isComplete: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return !incomplete
-        }
+    var isComplete: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !incomplete
+    }
 
-        func markIncomplete() {
-            lock.lock()
-            incomplete = true
-            lock.unlock()
-        }
+    func markIncomplete() {
+        lock.lock()
+        incomplete = true
+        lock.unlock()
     }
 }

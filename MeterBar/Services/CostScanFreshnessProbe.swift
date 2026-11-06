@@ -131,7 +131,7 @@ nonisolated enum CostScanFreshnessProbe {
     private static func walk(_ root: URL, since date: Date, fileNames: Set<String>?) -> WalkOutcome {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .contentModificationDateKey]
         let keySet = Set(keys)
-        let status = WalkStatus()
+        let status = CostScanWalkStatus()
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
@@ -167,27 +167,6 @@ nonisolated enum CostScanFreshnessProbe {
             if modified >= date { return .foundEvidence }
         }
         return status.isComplete ? .noEvidence : .incomplete
-    }
-
-    /// The enumerator's error handler outlives this call's stack frame, so
-    /// the flag it sets cannot be a captured local — mirrors
-    /// `CostScanCorpus`'s own `WalkStatus`, duplicated here rather than
-    /// shared since that type is private to its file.
-    private final class WalkStatus: @unchecked Sendable {
-        private let lock = NSLock()
-        private var incomplete = false
-
-        var isComplete: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return !incomplete
-        }
-
-        func markIncomplete() {
-            lock.lock()
-            incomplete = true
-            lock.unlock()
-        }
     }
 
     private static func roots(
