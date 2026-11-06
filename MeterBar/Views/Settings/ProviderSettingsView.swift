@@ -39,45 +39,58 @@ struct ProviderSettingsView: View {
         } message: {
             Text(claudeReconnectError ?? "Could not open the Claude reconnect flow.")
         }
+        .alert(
+            "Account Setup Problem",
+            isPresented: Binding(
+                get: { accountSetupError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        accountSetupError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") { accountSetupError = nil }
+        } message: {
+            Text(accountSetupError ?? "Could not set up the account.")
+        }
         .sheet(isPresented: $isAddingClaudeAccount) {
             AddProviderAccountSheet(
+                loginProvider: .claude,
                 providerName: ServiceType.claudeCode.shortName,
                 logoKind: .claude,
                 accent: MeterBarTheme.claudeAccent,
-                subtitle: "Use a separate CLAUDE_CONFIG_DIR for this profile.",
-                pathFieldLabel: "Config directory",
-                pathPlaceholder: "Path"
-            ) { name, configDirectory in
-                addClaudeAccount(name: name, configDirectory: configDirectory)
+                subtitle: "Name it. MeterBar creates the profile folder and starts the Claude login.",
+                pathFieldLabel: "Config directory (CLAUDE_CONFIG_DIR)"
+            ) { name, configDirectory, startsLogin in
+                setUpAccount(.claude, name: name, path: configDirectory, startsLogin: startsLogin)
                 isAddingClaudeAccount = false
             }
         }
         .sheet(isPresented: $isAddingCodexAccount) {
             AddProviderAccountSheet(
+                loginProvider: .codex,
                 providerName: ServiceType.codexCli.shortName,
                 logoKind: .codex,
                 accent: MeterBarTheme.codexAccent,
-                subtitle: "Use a separate CODEX_HOME containing its own auth.json.",
-                pathFieldLabel: "CODEX_HOME",
-                pathPlaceholder: "Codex home directory"
-            ) { name, homeDirectory in
-                codexAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                subtitle: "Name it. MeterBar creates a separate CODEX_HOME and starts codex login.",
+                pathFieldLabel: "CODEX_HOME"
+            ) { name, homeDirectory, startsLogin in
+                setUpAccount(.codex, name: name, path: homeDirectory, startsLogin: startsLogin)
                 isAddingCodexAccount = false
-                Task { await dataManager.refreshAll() }
             }
         }
         .sheet(isPresented: $isAddingGrokAccount) {
             AddProviderAccountSheet(
+                loginProvider: .grok,
                 providerName: ServiceType.xai.shortName,
                 logoKind: .xai,
                 accent: MeterBarTheme.xaiAccent,
-                subtitle: "Use a separate GROK_HOME containing its CLI-managed auth.json.",
-                pathFieldLabel: "GROK_HOME",
-                pathPlaceholder: "Grok home directory"
-            ) { name, homeDirectory in
-                grokAccountStore.addAccount(name: name, homeDirectory: homeDirectory)
+                subtitle: "Name it. MeterBar creates a separate GROK_HOME and starts grok login.",
+                pathFieldLabel: "GROK_HOME"
+            ) { name, homeDirectory, startsLogin in
+                setUpAccount(.grok, name: name, path: homeDirectory, startsLogin: startsLogin)
                 isAddingGrokAccount = false
-                Task { await dataManager.refreshAll() }
             }
         }
         .sheet(isPresented: $isAddingOpenRouterKey) {
@@ -127,6 +140,7 @@ struct ProviderSettingsView: View {
     @State private var isAddingOpenRouterKey = false
     @State private var refreshingClaudeAccountIDs: Set<UUID> = []
     @State private var claudeReconnectError: String?
+    @State private var accountSetupError: String?
     @State private var isConnectingCursor = false
 
     /// Same key ClaudeCodeLocalService reads. OAuth (`/api/oauth/usage`) is the
@@ -1070,13 +1084,60 @@ struct ProviderSettingsView: View {
 
     // MARK: - Account mutations
 
-    private func addClaudeAccount(name: String, configDirectory: String) {
-        claudeAccountStore.addAccount(
-            name: name,
-            configDirectory: configDirectory
-        )
-        Task {
-            await dataManager.refreshAll()
+    /// Shared add path for Claude, Codex and Grok: create the folder, add the
+    /// account, then start the provider's login scoped to that folder.
+    ///
+    /// The account is added before the login starts and stays if the login is
+    /// cancelled or never launches; it then reads as needing sign-in and the
+    /// row's reconnect / Check Again path finishes the job.
+    private func setUpAccount(
+        _ provider: AccountLoginProvider,
+        name: String,
+        path: String,
+        startsLogin: Bool
+    ) {
+        do {
+            let outcome = try AccountSetup.perform(
+                path: path,
+                startsLogin: startsLogin,
+                addAccount: { directory in
+                    switch provider {
+                    case .claude:
+                        claudeAccountStore.addAccount(name: name, configDirectory: directory)
+                    case .codex:
+                        codexAccountStore.addAccount(name: name, homeDirectory: directory)
+                    case .grok:
+                        grokAccountStore.addAccount(name: name, homeDirectory: directory)
+                    }
+                },
+                launchLogin: { directory in
+                    try startLogin(provider, name: name, directory: directory)
+                }
+            )
+            if let failure = outcome.loginFailure {
+                let retry = provider == .claude
+                    ? "Use Reconnect on its row."
+                    : "Run `\(provider.loginCommand)` with \(provider.environmentVariable) set to its folder."
+                accountSetupError = "\(name) was added, but its sign-in could not start: \(failure)\n\n"
+                    + "It shows as needing sign-in. \(retry)"
+            }
+        } catch {
+            accountSetupError = "\(name) was not added. \(error.localizedDescription)"
+        }
+        Task { await dataManager.refreshAll() }
+    }
+
+    private func startLogin(_ provider: AccountLoginProvider, name: String, directory: String) throws {
+        switch provider {
+        case .claude:
+            // The existing reconnect flow: `claude auth login` under
+            // CLAUDE_CONFIG_DIR. A transient account carries the folder; the
+            // stored one is identical apart from its id.
+            try ClaudeCodeReconnectService.openReconnectTerminal(
+                for: ClaudeCodeAccount(id: UUID(), name: name, configDirectory: directory)
+            )
+        case .codex, .grok:
+            try AccountSetup.openLoginTerminal(for: provider, profileName: name, directory: directory)
         }
     }
 

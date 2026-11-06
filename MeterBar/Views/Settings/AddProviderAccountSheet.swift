@@ -4,14 +4,20 @@ import SwiftUI
 
 /// Modal sheet for adding one multi-account CLI profile. Shared by Claude,
 /// Codex, and Grok — only branding and path copy differ.
+///
+/// Naming the account is enough: with the folder left empty MeterBar creates a
+/// default profile folder and, if asked, starts the provider's own CLI login
+/// scoped to it. Picking an existing folder still works unchanged.
 struct AddProviderAccountSheet: View {
+    let loginProvider: AccountLoginProvider
     let providerName: String
     let logoKind: ProviderLogoKind
     let accent: Color
     let subtitle: String
     let pathFieldLabel: String
-    let pathPlaceholder: String
-    let onAdd: (String, String) -> Void
+    /// Receives the account name, the resolved profile folder, and whether to
+    /// start the provider's login once the account is added.
+    let onAdd: (String, String, Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -40,20 +46,31 @@ struct AddProviderAccountSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        TextField(pathPlaceholder, text: $path)
+                        TextField(defaultPathDisplay, text: $path)
                             .settingsInput()
                         Button("Choose", action: chooseDirectory)
                             .buttonStyle(.bordered)
                     }
+                    Text(pathHelp)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Toggle(
+                    "Sign in to \(providerName) after adding",
+                    isOn: $startsLogin
+                )
+                .toggleStyle(.checkbox)
+                .font(.callout)
             }
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Add Account") {
-                    onAdd(trimmedName, trimmedPath)
+                Button(startsLogin ? "Add & Sign In" : "Add Account") {
+                    onAdd(trimmedName, resolvedPath, startsLogin)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -69,6 +86,7 @@ struct AddProviderAccountSheet: View {
     private var dismiss
     @State private var accountName = ""
     @State private var path = ""
+    @State private var startsLogin = true
 
     private var trimmedName: String {
         accountName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,8 +96,32 @@ struct AddProviderAccountSheet: View {
         path.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The folder a blank field falls back to, derived from the account name.
+    private var defaultPath: String {
+        AccountSetup.defaultDirectory(
+            for: loginProvider,
+            accountName: trimmedName.isEmpty ? "account" : trimmedName
+        )
+    }
+
+    private var defaultPathDisplay: String {
+        ServiceSupport.compactPathForDisplay(defaultPath)
+    }
+
+    private var resolvedPath: String {
+        trimmedPath.isEmpty ? defaultPath : trimmedPath
+    }
+
+    private var pathHelp: String {
+        let variable = loginProvider.environmentVariable
+        return trimmedPath.isEmpty
+            ? "MeterBar creates \(defaultPathDisplay) for \(variable). "
+            + "Choose a folder to use an existing profile instead."
+            : "Used as \(variable). A missing folder is created; an existing one is left as it is."
+    }
+
     private var canAdd: Bool {
-        !trimmedName.isEmpty && !trimmedPath.isEmpty
+        !trimmedName.isEmpty
     }
 
     private func chooseDirectory() {
